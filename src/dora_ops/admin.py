@@ -376,6 +376,8 @@ class AdminCommands:
         ]
         if result.reply:
             lines.append(f"回复：{result.reply}")
+        if result.admin_notification:
+            lines.append(f"管理员通知：{result.admin_notification}")
         return "\n".join(lines)
 
     @staticmethod

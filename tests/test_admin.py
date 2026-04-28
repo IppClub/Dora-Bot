@@ -117,12 +117,15 @@ class FakeQQAPI:
 
 class FakeDebounceRuntime:
     def __init__(self):
-        self.config = SimpleNamespace(group_chat=SimpleNamespace(debounce_seconds=0))
+        self.config = SimpleNamespace(
+            admin=SimpleNamespace(user_ids={123, 456}),
+            group_chat=SimpleNamespace(debounce_seconds=0),
+        )
         self.messages = []
 
     async def handle_group_message(self, msg):
         self.messages.append(msg)
-        return SimpleNamespace(reply=None, mention_admin_id=None, reason="test")
+        return SimpleNamespace(reply=None, admin_notification=None, mention_admin_id=None, reason="test")
 
 
 @pytest.mark.asyncio
@@ -214,6 +217,21 @@ async def test_plugin_debounces_group_messages_as_buffered_messages() -> None:
     assert msg.mentions_bot is True
     assert [item.text for item in msg.buffered_messages] == ["多萝", "补充"]
     assert [item.user_id for item in msg.buffered_messages] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_plugin_sends_group_feedback_notifications_to_admins() -> None:
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = SimpleNamespace(config=SimpleNamespace(admin=SimpleNamespace(user_ids={456, 123})))
+
+    await plugin._send_admin_notifications("群聊反馈已记录：#1")
+
+    assert qq.private_messages == [
+        (123, {"text": "群聊反馈已记录：#1"}),
+        (456, {"text": "群聊反馈已记录：#1"}),
+    ]
 
 
 @pytest.mark.asyncio
@@ -485,7 +503,8 @@ async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -
     assert "项目：Dora-SSR" in result
     assert "记录：1" in result
     assert "审批：1" in result
-    assert "回复：收到" in result
+    assert "回复：收到" not in result
+    assert "管理员通知：群聊反馈已记录：#1" in result
     feedback = await runtime.storage.get_feedback(1)
     assert feedback is not None
     assert feedback["group_id"] == 456

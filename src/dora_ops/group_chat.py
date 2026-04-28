@@ -91,6 +91,7 @@ class GroupMessageResult:
     feedback_id: int | None = None
     approval_id: int | None = None
     reply: str | None = None
+    admin_notification: str | None = None
     mention_admin_id: int | None = None
     accepted_for_analysis: bool = False
     reason: str = ""
@@ -211,15 +212,20 @@ class GroupMessageService:
                     else:
                         approval_id = int(existing["id"])
 
-        reply = self._build_reply(
+        admin_notification = self._build_admin_notification(
+            msg=msg,
+            text=text,
             classification=classification,
             feedback_id=feedback_id,
-            mentions_bot=mentions_bot,
-            accepted_for_analysis=accepted_for_analysis,
+            approval_id=approval_id,
             reason=reason,
         )
-        mention_admin_id = self._admin_to_mention(reason)
-        if reply is None:
+        reply = None if classification.should_accept else self._build_reply(
+            classification=classification,
+            mentions_bot=mentions_bot,
+        )
+        mention_admin_id = None
+        if reply is None and not classification.should_accept:
             reply = await self._llm_group_chat_reply(
                 msg.group_id,
                 conversation_key,
@@ -232,8 +238,25 @@ class GroupMessageService:
             if not classification.should_accept:
                 logger.info("group chat no reply: classification did not require response group=%s user=%s", msg.group_id, msg.user_id)
                 return None
-            logger.info("group chat recorded without reply: group=%s user=%s feedback=%s reason=%s", msg.group_id, msg.user_id, feedback_id, reason)
-            return GroupMessageResult(classification, feedback_id, approval_id, None, mention_admin_id, accepted_for_analysis, reason)
+            logger.info(
+                "group chat recorded without reply: group=%s user=%s feedback=%s approval=%s admin_notify=%s reason=%s",
+                msg.group_id,
+                msg.user_id,
+                feedback_id,
+                approval_id,
+                bool(admin_notification),
+                reason,
+            )
+            return GroupMessageResult(
+                classification,
+                feedback_id,
+                approval_id,
+                None,
+                admin_notification,
+                mention_admin_id,
+                accepted_for_analysis,
+                reason,
+            )
         await self.storage.append_chat_message(conversation_key, "assistant", reply)
         logger.info(
             "group chat reply ready: group=%s user=%s reason=%s feedback=%s approval=%s reply_len=%s",
@@ -244,7 +267,16 @@ class GroupMessageService:
             approval_id,
             len(reply),
         )
-        return GroupMessageResult(classification, feedback_id, approval_id, reply, mention_admin_id, accepted_for_analysis, reason)
+        return GroupMessageResult(
+            classification,
+            feedback_id,
+            approval_id,
+            reply,
+            admin_notification,
+            mention_admin_id,
+            accepted_for_analysis,
+            reason,
+        )
 
     def _contains_alias(self, text: str) -> bool:
         lowered = text.lower()
@@ -352,24 +384,8 @@ class GroupMessageService:
         self,
         *,
         classification: Classification,
-        feedback_id: int | None,
         mentions_bot: bool,
-        accepted_for_analysis: bool,
-        reason: str,
     ) -> str | None:
-        if classification.should_accept and self.config.group_chat.acknowledge_feedback:
-            project = classification.project or "项目"
-            if classification.needs_repo_analysis:
-                if accepted_for_analysis:
-                    return f"收到，已记录为 #{feedback_id}。这个像是 {project} 的有效问题，深度分析先等管理员确认。"
-                if reason == "manual_required":
-                    return f"收到，已记录为 #{feedback_id}。这个像是 {project} 的有效问题，管理员私聊发送 /approve feedback {feedback_id} 可批准深度分析。"
-                if reason == "group_quota_exceeded":
-                    return f"收到，已记录为 #{feedback_id}。今天本群深度分析额度已用完。"
-                if reason == "user_quota_exceeded":
-                    return f"收到，已记录为 #{feedback_id}。你今天的深度分析额度已用完。"
-            return f"收到，已记录为 #{feedback_id}。"
-
         if mentions_bot:
             if self._chat_available():
                 return None
@@ -379,7 +395,28 @@ class GroupMessageService:
 
         return None
 
-    def _admin_to_mention(self, reason: str) -> int | None:
-        if reason != "manual_required":
+    @staticmethod
+    def _build_admin_notification(
+        *,
+        msg: GroupMessageInput,
+        text: str,
+        classification: Classification,
+        feedback_id: int | None,
+        approval_id: int | None,
+        reason: str,
+    ) -> str | None:
+        if not classification.should_accept or feedback_id is None:
             return None
-        return next(iter(sorted(self.config.admin.user_ids)), None)
+        lines = [
+            f"群聊反馈已记录：#{feedback_id}",
+            f"群：{msg.group_id}",
+            f"用户：{msg.nickname or msg.user_id} ({msg.user_id})",
+            f"项目：{classification.project or '-'}",
+            f"摘要：{classification.summary}",
+            f"原因：{reason}",
+            f"原文：{text}",
+        ]
+        if approval_id is not None:
+            lines.append(f"审批：#{approval_id}")
+            lines.append(f"批准分析：/approve feedback {feedback_id}")
+        return "\n".join(lines)

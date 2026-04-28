@@ -195,6 +195,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             bool(group_result and group_result.reply),
             getattr(group_result, "reason", None),
         )
+        if group_result and group_result.admin_notification:
+            await self._send_admin_notifications(group_result.admin_notification)
         if group_result and group_result.reply:
             await self._send_group_reply(pending.group_id, group_result.reply, group_result.mention_admin_id)
 
@@ -281,6 +283,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             await self.api.qq.post_group_msg(group_id, text=text, at=at_user_id)
             return
         await self.api.qq.post_group_msg(group_id, text=text)
+
+    async def _send_admin_notifications(self, text: str) -> None:
+        for user_id in sorted(self.runtime.config.admin.user_ids):
+            await self._send_private_reply(user_id, text)
 
     def _daily_summary_group_ids(self) -> list[int]:
         configured = self.runtime.config.scheduler.daily_summary_group_ids

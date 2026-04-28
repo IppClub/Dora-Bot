@@ -93,10 +93,11 @@ async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> No
     assert result is not None
     assert result.feedback_id is not None
     assert result.approval_id is not None
-    assert result.mention_admin_id == 123
-    assert result.reply is not None
-    assert "已记录" in result.reply
-    assert f"/approve feedback {result.feedback_id}" in result.reply
+    assert result.mention_admin_id is None
+    assert result.reply is None
+    assert result.admin_notification is not None
+    assert "群聊反馈已记录：#" in result.admin_notification
+    assert f"/approve feedback {result.feedback_id}" in result.admin_notification
     stored = await runtime.storage.get_feedback(result.feedback_id)
     assert stored is not None
     assert stored["project"] == "Dora-SSR"
@@ -259,8 +260,9 @@ async def test_group_feedback_ack_takes_priority_over_llm_chat(tmp_path: Path) -
 
     assert result is not None
     assert result.reason == "manual_required"
-    assert result.reply is not None
-    assert "已记录" in result.reply
+    assert result.reply is None
+    assert result.admin_notification is not None
+    assert "群聊反馈已记录：#" in result.admin_notification
     assert fake.calls == []
 
 

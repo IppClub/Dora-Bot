@@ -16,7 +16,6 @@ group_chat:
     - 多萝
     - Dora
     - Dora Bot
-  acknowledge_feedback: true
   chat_enabled: true
   # Buffer continuous group messages before one classification/reply pass.
   debounce_seconds: 60
