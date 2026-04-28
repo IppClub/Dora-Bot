@@ -102,6 +102,18 @@ class FakeToDictText:
         return {"type": "text", "data": {"text": "dict text"}}
 
 
+class FakeQQAPI:
+    def __init__(self):
+        self.private_messages = []
+        self.group_messages = []
+
+    async def send_private_msg(self, user_id, message):
+        self.private_messages.append((user_id, message))
+
+    async def send_group_msg(self, group_id, message):
+        self.group_messages.append((group_id, message))
+
+
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -159,6 +171,28 @@ def test_plugin_message_segments_support_to_dict_objects() -> None:
     msg = SimpleNamespace(message=[FakeToDictText()])
 
     assert DoraOpsPlugin._extract_text(msg) == "dict text"
+
+
+@pytest.mark.asyncio
+async def test_plugin_sends_messages_through_ncatbot_qq_api() -> None:
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+
+    await plugin._send_private_reply(123, "私聊")
+    await plugin._send_group_reply(456, "群聊", at_user_id=789)
+
+    assert qq.private_messages == [(123, [{"type": "text", "data": {"text": "私聊"}}])]
+    assert qq.group_messages == [
+        (
+            456,
+            [
+                {"type": "at", "data": {"qq": "789"}},
+                {"type": "text", "data": {"text": " "}},
+                {"type": "text", "data": {"text": "群聊"}},
+            ],
+        )
+    ]
 
 
 @pytest.mark.asyncio

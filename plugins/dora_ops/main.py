@@ -110,11 +110,11 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
             logger.info("private message handled: user=%s replied=%s", user_id, bool(result))
             if result:
-                await self.api.post_private_msg(user_id, text=result)
+                await self._send_private_reply(user_id, result)
                 self._maybe_watch_daily_progress(
                     text,
                     result,
-                    lambda message: self.api.post_private_msg(user_id, text=message),
+                    lambda message: self._send_private_reply(user_id, message),
                 )
 
         async def on_group_message(self, msg) -> None:
@@ -224,11 +224,20 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 return str(value.get("text") or "")
         return ""
 
+    async def _send_private_reply(self, user_id: int, text: str) -> None:
+        await self.api.qq.send_private_msg(user_id, self._text_message(text))
+
     async def _send_group_reply(self, group_id: int, text: str, at_user_id: int | None = None) -> None:
+        message = []
         if at_user_id is not None:
-            await self.api.post_group_msg(group_id, text=text, at=at_user_id)
-            return
-        await self.api.post_group_msg(group_id, text=text)
+            message.append({"type": "at", "data": {"qq": str(at_user_id)}})
+            message.append({"type": "text", "data": {"text": " "}})
+        message.extend(self._text_message(text))
+        await self.api.qq.send_group_msg(group_id, message)
+
+    @staticmethod
+    def _text_message(text: str) -> list[dict[str, dict[str, str]]]:
+        return [{"type": "text", "data": {"text": text}}]
 
     def _daily_summary_group_ids(self) -> list[int]:
         configured = self.runtime.config.scheduler.daily_summary_group_ids
