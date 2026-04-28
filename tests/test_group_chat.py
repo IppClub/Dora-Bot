@@ -157,6 +157,9 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     system_prompt = fake.calls[0][0]["content"]
     assert "# 角色设定" in system_prompt
     assert "坏酷又讨人喜欢的小萝莉" in system_prompt
+    assert "# 多萝能做什么" in system_prompt
+    assert "/test daily-summary --progress" in system_prompt
+    assert "不能假装已经执行命令" in system_prompt
     assert "消息中明确 @多萝 或提及 Dora SSR 就一定要回复" in system_prompt
     assert "不需要回复时返回空字符串" in system_prompt
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
