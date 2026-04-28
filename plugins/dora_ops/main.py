@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+import re
+from typing import Awaitable, Callable
 
 try:
     from ncatbot.plugin import NcatBotPlugin
@@ -11,6 +14,12 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
 
 from dora_ops.runtime import DoraOpsRuntime
 from dora_ops.group_chat import GroupMessageInput
+from dora_ops.jobs import JobManager
+from dora_ops.models import JobStatus
+
+
+PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
+PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
 
 
 class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
@@ -38,6 +47,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
             if result:
                 await event.reply(text=result)
+                self._maybe_watch_daily_progress(text, result, lambda message: event.reply(text=message))
 
         @registrar.qq.on_group_message()
         async def on_group_message(self, event) -> None:
@@ -64,6 +74,11 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
             if result:
                 await self.api.post_private_msg(user_id, text=result)
+                self._maybe_watch_daily_progress(
+                    text,
+                    result,
+                    lambda message: self.api.post_private_msg(user_id, text=message),
+                )
 
         async def on_group_message(self, msg) -> None:
             text = getattr(msg, "raw_message", "") or self._extract_text(msg)
@@ -101,3 +116,76 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             await self.api.post_group_msg(group_id, text=text, at=at_user_id)
             return
         await self.api.post_group_msg(group_id, text=text)
+
+    def _maybe_watch_daily_progress(
+        self,
+        command_text: str,
+        result_text: str,
+        send: Callable[[str], Awaitable[object]],
+    ) -> None:
+        if not command_text.startswith("/test daily-summary") or "--progress" not in command_text:
+            return
+        job_ids = [int(match.group(1)) for match in PROGRESS_JOB_PATTERN.finditer(result_text)]
+        if not job_ids:
+            return
+        asyncio.create_task(self._watch_progress_jobs(job_ids, send))
+
+    async def _watch_progress_jobs(
+        self,
+        job_ids: list[int],
+        send: Callable[[str], Awaitable[object]],
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + self.runtime.config.jobs.max_runtime_seconds + 30
+        terminal = {JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.TIMEOUT.value}
+        while True:
+            jobs = await self._progress_jobs_by_id(job_ids)
+            for job in jobs.values():
+                await self.runtime.jobs.reconcile_job(job)
+            jobs = await self._progress_jobs_by_id(job_ids)
+            if all(str(jobs[job_id].get("status")) in terminal for job_id in job_ids if job_id in jobs):
+                await send(self._format_progress_results(job_ids, jobs))
+                return
+            if asyncio.get_running_loop().time() >= deadline:
+                for job_id in job_ids:
+                    job = jobs.get(job_id)
+                    if job is not None and str(job.get("status")) not in terminal:
+                        await self.runtime.storage.update_job_status(
+                            job_id,
+                            JobStatus.TIMEOUT,
+                            "progress watcher timed out",
+                        )
+                jobs = await self._progress_jobs_by_id(job_ids)
+                await send(self._format_progress_results(job_ids, jobs))
+                return
+            await asyncio.sleep(5)
+
+    async def _progress_jobs_by_id(self, job_ids: list[int]) -> dict[int, dict[str, object]]:
+        jobs = await self.runtime.storage.list_recent_jobs(limit=50, include_test=True)
+        wanted = set(job_ids)
+        return {int(job["id"]): job for job in jobs if int(job["id"]) in wanted}
+
+    @staticmethod
+    def _format_progress_results(job_ids: list[int], jobs: dict[int, dict[str, object]]) -> str:
+        lines = ["昨日进展分析结果："]
+        for job_id in job_ids:
+            job = jobs.get(job_id)
+            if job is None:
+                lines.append(f"- job #{job_id}: missing")
+                continue
+            repo = DoraOpsPlugin._repo_from_progress_session(str(job.get("tmux_session") or "")) or f"job #{job_id}"
+            status = str(job.get("status") or "-")
+            if status == JobStatus.SUCCEEDED.value:
+                analysis = JobManager._read_analysis(Path(str(job["output_path"])))
+                summary = analysis.get("summary") or analysis.get("announcement") or analysis.get("raw") or "分析完成"
+                lines.append(f"- {repo}: succeeded\n  {str(summary)[:500]}")
+            elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
+                error = str(job.get("error") or status)
+                lines.append(f"- {repo}: {status}\n  {error[:500]}")
+            else:
+                lines.append(f"- {repo}: {status}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _repo_from_progress_session(session: str) -> str | None:
+        match = PROGRESS_SESSION_PATTERN.match(session)
+        return match.group(1) if match else None

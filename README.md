@@ -101,7 +101,7 @@ Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related 
 
 `/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path from private chat. Pass the target group id explicitly.
 
-`/test tmux`, `/test opencode ...`, and `/test daily-summary --progress` create asynchronous jobs under `jobs/`. `/test daily-summary --progress` tests the yesterday progress analysis path for all configured repositories. `/test job-status --include-test` reconciles finished jobs and shows the output summary when available.
+`/test tmux`, `/test opencode ...`, and `/test daily-summary --progress` create asynchronous jobs under `jobs/`. `/test daily-summary --progress` tests the yesterday progress analysis path for all configured repositories and the plugin automatically tracks those jobs, then sends the final summaries back to the admin private chat. `/test job-status --include-test` can still be used to reconcile and inspect recent jobs manually.
 
 When group chat records a feedback item that needs deeper repository analysis, it creates a pending approval. Admins approve or reject it in private chat:
 
@@ -134,6 +134,8 @@ Manual test trigger:
 ```text
 /test daily-summary --progress
 ```
+
+After the command creates jobs, the plugin polls them in the background and sends a final `昨日进展分析结果` message when all jobs succeed, fail, or time out.
 
 NcatBot startup:
 
