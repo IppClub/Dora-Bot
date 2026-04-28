@@ -47,6 +47,8 @@ class AdminCommands:
         return group_id is not None and group_id in self.config.admin.group_ids
 
     async def handle(self, text: str, *, user_id: int, group_id: int | None = None) -> str | None:
+        if group_id is not None:
+            return None
         if not (text.startswith("/test") or text.startswith("/approve") or text.startswith("/reject") or text.startswith("/approvals")):
             return None
         if not self.is_admin(user_id):
@@ -96,7 +98,7 @@ class AdminCommands:
 
         if command == "group-chat":
             try:
-                return await self._handle_group_chat_test(arg, user_id=user_id, group_id=group_id)
+                return await self._handle_group_chat_test(arg, user_id=user_id)
             except ValueError as exc:
                 return str(exc)
 
@@ -170,7 +172,7 @@ class AdminCommands:
                 "/test ping",
                 "/test classify <文本>",
                 "/test feedback <文本>",
-                "/test group-chat [群号] <文本>",
+                "/test group-chat <群号> <文本>",
                 "/test repo-check Dora-SSR|YueScript",
                 "/test tmux",
                 "/test opencode Dora-SSR|YueScript",
@@ -183,8 +185,8 @@ class AdminCommands:
             ]
         )
 
-    async def _handle_group_chat_test(self, arg: str, *, user_id: int, group_id: int | None = None) -> str:
-        target_group_id, text = self._parse_group_chat_test(arg, fallback_group_id=group_id)
+    async def _handle_group_chat_test(self, arg: str, *, user_id: int) -> str:
+        target_group_id, text = self._parse_group_chat_test(arg)
         result = await self.group_chat_test(target_group_id, user_id=user_id, text=text)
         if result is None:
             return f"群聊测试：无响应\n群：{target_group_id}"
@@ -214,17 +216,11 @@ class AdminCommands:
         return "\n".join(lines)
 
     @staticmethod
-    def _parse_group_chat_test(arg: str, *, fallback_group_id: int | None = None) -> tuple[int, str]:
+    def _parse_group_chat_test(arg: str) -> tuple[int, str]:
         parts = arg.split(maxsplit=1)
-        if not parts:
-            raise ValueError("格式错误：/test group-chat [群号] <文本>")
-        if parts[0].isdigit():
-            if len(parts) != 2 or not parts[1].strip():
-                raise ValueError("格式错误：/test group-chat [群号] <文本>")
-            return int(parts[0]), parts[1].strip()
-        if fallback_group_id is None:
-            raise ValueError("私聊测试群聊时需要指定群号：/test group-chat <群号> <文本>")
-        return fallback_group_id, arg.strip()
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].strip():
+            raise ValueError("格式错误：/test group-chat <群号> <文本>")
+        return int(parts[0]), parts[1].strip()
 
     @staticmethod
     def _group_chat_test_text(group_id: int, result: GroupMessageResult) -> str:

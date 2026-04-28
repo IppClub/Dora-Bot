@@ -48,8 +48,7 @@ async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     assert "YueScript" in classified
 
     group_pong = await runtime.handle_admin_text("/test ping", user_id=123, group_id=456)
-    assert group_pong is not None
-    assert "pong" in group_pong
+    assert group_pong is None
 
 
 @pytest.mark.asyncio
@@ -88,18 +87,16 @@ async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_group_chat_test_uses_current_group_when_group_id_is_omitted(tmp_path: Path) -> None:
+async def test_group_chat_test_requires_group_id_in_private_chat(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
     private_error = await runtime.handle_admin_text("/test group-chat Dora SSR 报错", user_id=123)
-    assert private_error == "私聊测试群聊时需要指定群号：/test group-chat <群号> <文本>"
+    assert private_error == "格式错误：/test group-chat <群号> <文本>"
 
     result = await runtime.handle_admin_text("/test group-chat Dora SSR 报错", user_id=123, group_id=789)
-    assert result is not None
-    assert "群：789" in result
-    assert "分类：feedback" in result
+    assert result is None
 
 
 @pytest.mark.asyncio

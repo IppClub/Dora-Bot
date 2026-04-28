@@ -74,12 +74,12 @@ uv run dora-bot --config dora-bot.yaml admin '/test repo-check Dora-SSR' --user-
 uv run dora-bot --config dora-bot.yaml admin '/test daily-summary --dry-run' --user-id 123456
 ```
 
-The first implemented NcatBot surface is the admin test console. These commands run in private chat with an admin account, and also in group chat when sent by an admin:
+The first implemented NcatBot surface is the admin test console. These commands run in private chat with an admin account:
 
 - `/test ping`
 - `/test classify <文本>`
 - `/test feedback <文本>`
-- `/test group-chat [群号] <文本>`
+- `/test group-chat <群号> <文本>`
 - `/test repo-check Dora-SSR|YueScript`
 - `/test tmux`
 - `/test opencode Dora-SSR|YueScript`
@@ -89,11 +89,11 @@ The first implemented NcatBot surface is the admin test console. These commands 
 - `/approve feedback <id>`
 - `/reject feedback <id>`
 
-`/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path. In private chat, pass the group id explicitly; in a group, the current group id is used when omitted.
+`/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path from private chat. Pass the target group id explicitly.
 
 `/test tmux`, `/test opencode ...`, and `/test daily-summary --progress` create asynchronous jobs under `jobs/`. `/test daily-summary --progress` tests the yesterday progress analysis path for all configured repositories. `/test job-status --include-test` reconciles finished jobs and shows the output summary when available.
 
-When group chat records a feedback item that needs deeper repository analysis, it creates a pending approval. Admins can approve or reject it in private chat or group chat:
+When group chat records a feedback item that needs deeper repository analysis, it creates a pending approval. Admins approve or reject it in private chat:
 
 ```text
 /approvals
