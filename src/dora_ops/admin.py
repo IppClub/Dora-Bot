@@ -50,7 +50,9 @@ class AdminCommands:
         if group_id is not None:
             return None
         if not (text.startswith("/test") or text.startswith("/approve") or text.startswith("/reject") or text.startswith("/approvals")):
-            return None
+            if not self.is_admin(user_id):
+                return None
+            return await self._handle_private_chat(text, user_id=user_id)
         if not self.is_admin(user_id):
             return "没有管理员权限。"
 
@@ -191,6 +193,41 @@ class AdminCommands:
         if result is None:
             return f"群聊测试：无响应\n群：{target_group_id}"
         return self._group_chat_test_text(target_group_id, result)
+
+    async def _handle_private_chat(self, text: str, *, user_id: int) -> str | None:
+        normalized = text.strip()
+        if not normalized:
+            return None
+        classification = classify_text(normalized)
+        if not classification.should_accept:
+            if classification.project:
+                return "看起来和项目有关，但信息还不够。请补充报错全文、平台、版本和最小复现。"
+            return "这条我先不归档。要记录 Dora SSR 或 YueScript 的问题，请把报错、平台和复现步骤一起发。"
+
+        feedback_id = await self.storage.create_feedback(
+            original_text=normalized,
+            group_id=None,
+            user_id=user_id,
+            project=classification.project,
+            kind=classification.kind,
+            title=classification.summary[:40],
+            normalized_summary=classification.summary,
+        )
+        if not classification.needs_repo_analysis:
+            return f"收到，已记录为 #{feedback_id}。"
+
+        existing = await self.storage.get_pending_approval("feedback", feedback_id)
+        approval_id = int(existing["id"]) if existing is not None else await self.storage.create_approval_request(
+            target_type="feedback",
+            target_id=feedback_id,
+            requested_by=user_id,
+            requested_group_id=None,
+            command=f"/approve feedback {feedback_id}",
+        )
+        return (
+            f"收到，已记录为 #{feedback_id}。这个像是 {classification.project or '项目'} 的有效问题，"
+            f"发送 /approve feedback {feedback_id} 可批准深度分析。审批 #{approval_id}。"
+        )
 
     async def group_chat_test(self, group_id: int, *, user_id: int, text: str) -> GroupMessageResult | None:
         return await self.group_chat.handle(

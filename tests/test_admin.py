@@ -64,6 +64,43 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_admin_private_chat_records_feedback_and_approval(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    ignored = await runtime.handle_admin_text("Dora SSR Web IDE 无法刷新", user_id=999)
+    assert ignored is None
+
+    result = await runtime.handle_admin_text("Dora SSR Web IDE 创建文件后无法刷新", user_id=123)
+    assert result is not None
+    assert "已记录为 #1" in result
+    assert "/approve feedback 1" in result
+    assert "审批 #1" in result
+
+    feedback = await runtime.storage.get_feedback(1)
+    assert feedback is not None
+    assert feedback["group_id"] is None
+    assert feedback["user_id"] == 123
+    assert feedback["project"] == "Dora-SSR"
+    approval = await runtime.storage.get_pending_approval("feedback", 1)
+    assert approval is not None
+    assert approval["requested_group_id"] is None
+    assert approval["command"] == "/approve feedback 1"
+
+
+@pytest.mark.asyncio
+async def test_admin_private_chat_replies_without_recording_unrelated(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text("今天吃什么", user_id=123)
+    assert result is not None
+    assert "不归档" in result
+
+
+@pytest.mark.asyncio
 async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")

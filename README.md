@@ -89,6 +89,8 @@ The first implemented NcatBot surface is the admin test console. These commands 
 - `/approve feedback <id>`
 - `/reject feedback <id>`
 
+Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related feedback is recorded, and messages that need repository analysis create a pending approval that can be approved with `/approve feedback <id>`.
+
 `/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path from private chat. Pass the target group id explicitly.
 
 `/test tmux`, `/test opencode ...`, and `/test daily-summary --progress` create asynchronous jobs under `jobs/`. `/test daily-summary --progress` tests the yesterday progress analysis path for all configured repositories. `/test job-status --include-test` reconciles finished jobs and shows the output summary when available.
