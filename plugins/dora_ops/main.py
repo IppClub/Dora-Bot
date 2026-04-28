@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
     get_log = None  # type: ignore[assignment]
 
 from dora_ops.runtime import DoraOpsRuntime
-from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupMessageInput
+from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupBufferedMessage, GroupMessageInput
 from dora_ops.llm import LLMError
 from dora_ops.models import JobStatus
 
@@ -27,11 +27,20 @@ PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
 logger = get_log("DoraOps") if get_log is not None else logging.getLogger(__name__)
 
 
+class PendingGroupMessage:
+    def __init__(self, *, group_id: int):
+        self.group_id = group_id
+        self.messages: list[GroupBufferedMessage] = []
+        self.mentions_bot = False
+        self.task: asyncio.Task | None = None
+
+
 class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     name = "dora_ops"
     version = "0.1.0"
 
     async def on_load(self) -> None:
+        self._pending_group_messages: dict[int, PendingGroupMessage] = {}
         self.runtime = await DoraOpsRuntime.create(Path("dora-bot.yaml"))
         logger.info(
             "dora_ops loaded: admins=%s admin_groups=%s group_enabled=%s group_ids=%s llm_enabled=%s",
@@ -81,25 +90,13 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 mentions_bot,
                 self._clip_log(text),
             )
-            group_result = await self.runtime.handle_group_message(
-                GroupMessageInput(
-                    group_id=group_id,
-                    user_id=user_id,
-                    nickname=str(getattr(getattr(event, "sender", None), "nickname", "")),
-                    text=text,
-                    mentions_bot=mentions_bot,
-                )
+            await self._enqueue_group_message(
+                group_id=group_id,
+                user_id=user_id,
+                nickname=str(getattr(getattr(event, "sender", None), "nickname", "")),
+                text=text,
+                mentions_bot=mentions_bot,
             )
-            logger.info(
-                "group message handled: group=%s user=%s result=%s replied=%s reason=%s",
-                group_id,
-                user_id,
-                bool(group_result),
-                bool(group_result and group_result.reply),
-                getattr(group_result, "reason", None),
-            )
-            if group_result and group_result.reply:
-                await self._send_group_reply(group_id, group_result.reply, group_result.mention_admin_id)
 
     else:
 
@@ -129,25 +126,77 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 mentions_bot,
                 self._clip_log(text),
             )
-            group_result = await self.runtime.handle_group_message(
-                GroupMessageInput(
-                    group_id=group_id,
-                    user_id=user_id,
-                    nickname=str(getattr(getattr(msg, "sender", None), "nickname", "")),
-                    text=text,
-                    mentions_bot=mentions_bot,
-                )
+            await self._enqueue_group_message(
+                group_id=group_id,
+                user_id=user_id,
+                nickname=str(getattr(getattr(msg, "sender", None), "nickname", "")),
+                text=text,
+                mentions_bot=mentions_bot,
             )
-            logger.info(
-                "group message handled: group=%s user=%s result=%s replied=%s reason=%s",
-                group_id,
-                user_id,
-                bool(group_result),
-                bool(group_result and group_result.reply),
-                getattr(group_result, "reason", None),
+
+    async def _enqueue_group_message(self, *, group_id: int, user_id: int, nickname: str, text: str, mentions_bot: bool) -> None:
+        if not hasattr(self, "_pending_group_messages"):
+            self._pending_group_messages = {}
+        pending = self._pending_group_messages.get(group_id)
+        if pending is None:
+            pending = PendingGroupMessage(group_id=group_id)
+            self._pending_group_messages[group_id] = pending
+        pending.messages.append(GroupBufferedMessage(user_id=user_id, nickname=nickname, text=text, mentions_bot=mentions_bot))
+        pending.mentions_bot = pending.mentions_bot or mentions_bot
+        if pending.task is not None:
+            pending.task.cancel()
+        delay = self.runtime.config.group_chat.debounce_seconds
+        logger.info(
+            "group message debounced: group=%s user=%s delay=%.1fs buffered=%s mentions_bot=%s",
+            group_id,
+            user_id,
+            delay,
+            len(pending.messages),
+            pending.mentions_bot,
+        )
+        pending.task = asyncio.create_task(self._flush_group_message_after_delay(group_id, delay))
+
+    async def _flush_group_message_after_delay(self, group_id: int, delay: float) -> None:
+        try:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            await self._flush_group_message(group_id)
+        except asyncio.CancelledError:
+            raise
+
+    async def _flush_group_message(self, group_id: int) -> None:
+        pending = self._pending_group_messages.pop(group_id, None)
+        if pending is None:
+            return
+        messages = tuple(pending.messages)
+        last = messages[-1] if messages else GroupBufferedMessage(0, "", "", False)
+        logger.info(
+            "group message debounce flush: group=%s user=%s buffered=%s latest=%r",
+            group_id,
+            last.user_id,
+            len(messages),
+            self._clip_log(last.text),
+        )
+        group_result = await self.runtime.handle_group_message(
+            GroupMessageInput(
+                group_id=pending.group_id,
+                user_id=last.user_id,
+                nickname=last.nickname,
+                text=last.text,
+                mentions_bot=pending.mentions_bot,
+                buffered_messages=messages,
             )
-            if group_result and group_result.reply:
-                await self._send_group_reply(group_id, group_result.reply, group_result.mention_admin_id)
+        )
+        logger.info(
+            "group message handled: group=%s user=%s result=%s replied=%s reason=%s",
+            pending.group_id,
+            last.user_id,
+            bool(group_result),
+            bool(group_result and group_result.reply),
+            getattr(group_result, "reason", None),
+        )
+        if group_result and group_result.reply:
+            await self._send_group_reply(pending.group_id, group_result.reply, group_result.mention_admin_id)
 
     @staticmethod
     def _message_text(msg) -> str:

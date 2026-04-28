@@ -18,7 +18,10 @@ group_chat:
     - Dora Bot
   acknowledge_feedback: true
   chat_enabled: true
-  chat_cooldown_seconds: 20
+  # Buffer continuous group messages before one classification/reply pass.
+  debounce_seconds: 60
+  # Minimum interval for proactive non-mention replies in the same group.
+  chat_cooldown_seconds: 120
   daily_group_analysis_limit: 3
   daily_user_analysis_limit: 1
   # Keep false until you are comfortable with the reply behavior.

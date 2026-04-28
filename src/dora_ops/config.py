@@ -25,7 +25,8 @@ class GroupChatConfig(BaseModel):
     bot_aliases: list[str] = Field(default_factory=lambda: ["多萝", "Dora", "Dora Bot"])
     acknowledge_feedback: bool = True
     chat_enabled: bool = True
-    chat_cooldown_seconds: int = Field(default=20, ge=0)
+    debounce_seconds: float = Field(default=60.0, ge=0)
+    chat_cooldown_seconds: int = Field(default=120, ge=0)
     daily_group_analysis_limit: int = 3
     daily_user_analysis_limit: int = 1
     auto_create_analysis_jobs: bool = False

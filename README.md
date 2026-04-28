@@ -64,13 +64,14 @@ group_chat:
     - Dora
   acknowledge_feedback: true
   chat_enabled: true
-  chat_cooldown_seconds: 20
+  debounce_seconds: 60
+  chat_cooldown_seconds: 120
   daily_group_analysis_limit: 3
   daily_user_analysis_limit: 1
   auto_create_analysis_jobs: false
 ```
 
-With `enabled_group_ids: []`, every group is allowed. For production, fill explicit group ids. The current group-chat path is conservative: Dora SSR/YueScript-related feedback is recorded and acknowledged, unrelated messages are ignored, and deep repository analysis waits for admin confirmation unless later enabled explicitly. When `llm.enabled` and `group_chat.chat_enabled` are true, group chat history is stored and the chat model may reply as Dora after being mentioned or after the cooldown window.
+With `enabled_group_ids: []`, every group is allowed. For production, fill explicit group ids. The current group-chat path is conservative: Dora SSR/YueScript-related feedback is recorded and acknowledged, unrelated messages are ignored, and deep repository analysis waits for admin confirmation unless later enabled explicitly. Group messages are buffered for `debounce_seconds` before one handling pass. When `llm.enabled` and `group_chat.chat_enabled` are true, group chat history is stored and the chat model may reply as Dora after being mentioned, or to high-confidence project questions after the cooldown window.
 
 Useful commands:
 

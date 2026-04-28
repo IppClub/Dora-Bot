@@ -20,6 +20,8 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
 
 logger = get_log("DoraOps.GroupChat") if get_log is not None else logging.getLogger(__name__)
 
+PASSIVE_REPLY_CONFIDENCE = 0.75
+
 
 DORA_PERSONA_PROMPT = """# 角色设定
 你是多萝（Dora），Dora SSR 开源游戏引擎的吉祥物，负责在群聊中活跃气氛，形象是一个坏酷又讨人喜欢的小萝莉。你的核心特征：
@@ -51,7 +53,8 @@ DORA_PERSONA_PROMPT = """# 角色设定
 GROUP_CHAT_SYSTEM_PROMPT = f"""{DORA_PERSONA_PROMPT}
 # 任务规则
 1. 分析最新群聊消息，判断是否需要以多萝身份回复
-2. **必须回复**的情况：
+2. 群聊里不要抢话。没有明确需要你时保持沉默，宁愿少回也不要刷屏
+3. **必须回复**的情况：
     - 消息中明确 @多萝 或提及 Dora SSR 就一定要回复
     - 讨论游戏引擎/开源技术问题且需要专业建议
     - 开发者表现出困惑或需要鼓励
@@ -65,12 +68,21 @@ GROUP_CHAT_SYSTEM_PROMPT = f"""{DORA_PERSONA_PROMPT}
 
 
 @dataclass(frozen=True)
+class GroupBufferedMessage:
+    user_id: int
+    nickname: str
+    text: str
+    mentions_bot: bool = False
+
+
+@dataclass(frozen=True)
 class GroupMessageInput:
     group_id: int
     user_id: int
     nickname: str
     text: str
     mentions_bot: bool = False
+    buffered_messages: tuple[GroupBufferedMessage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,23 +124,26 @@ class GroupMessageService:
             )
             return None
 
-        text = msg.text.strip()
-        mentions_bot = msg.mentions_bot or self._contains_alias(text)
-        if not text:
-            if not mentions_bot:
+        messages = self._input_messages(msg)
+        if not messages:
+            if not msg.mentions_bot:
                 logger.info("group chat skipped: empty text group=%s user=%s", msg.group_id, msg.user_id)
                 return None
             text = "@多萝"
+            messages = (GroupBufferedMessage(msg.user_id, msg.nickname, text, True),)
+        text = self._classification_text(messages)
+        mentions_bot = msg.mentions_bot or any(item.mentions_bot or self._contains_alias(item.text) for item in messages)
         if text.startswith("/test"):
             logger.info("group chat skipped: test command ignored group=%s user=%s", msg.group_id, msg.user_id)
             return None
 
         conversation_key = self._group_conversation_key(msg.group_id)
-        await self.storage.append_chat_message(
-            conversation_key,
-            "user",
-            self._format_group_user_message(msg.nickname, text, mentions_bot=mentions_bot),
-        )
+        for item in messages:
+            await self.storage.append_chat_message(
+                conversation_key,
+                "user",
+                self._format_group_user_message(item.nickname, item.text, mentions_bot=item.mentions_bot),
+            )
         classification = await self._classify(text)
         logger.info(
             "group chat classified: group=%s user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f mentions=%s",
@@ -142,14 +157,24 @@ class GroupMessageService:
             mentions_bot,
         )
         can_chat = self._can_chat(msg.group_id, mentions_bot=mentions_bot)
-        should_explain = classification.kind == "project_question"
-        if not classification.should_accept and not mentions_bot and not can_chat and not should_explain:
+        should_explain = self._should_explain(classification, mentions_bot=mentions_bot)
+        if not classification.should_accept and not mentions_bot and not should_explain:
             logger.info(
-                "group chat skipped: no trigger group=%s user=%s can_chat=%s should_explain=%s",
+                "group chat skipped: no trigger group=%s user=%s can_chat=%s action=%s confidence=%.2f should_explain=%s",
                 msg.group_id,
                 msg.user_id,
                 can_chat,
+                classification.action,
+                classification.confidence,
                 should_explain,
+            )
+            return None
+        if not classification.should_accept and not mentions_bot and should_explain and not can_chat:
+            logger.info(
+                "group chat skipped: cooldown group=%s user=%s cooldown=%ss",
+                msg.group_id,
+                msg.user_id,
+                self.config.group_chat.chat_cooldown_seconds,
             )
             return None
 
@@ -225,6 +250,21 @@ class GroupMessageService:
         lowered = text.lower()
         return any(alias.lower() in lowered for alias in self.config.group_chat.bot_aliases)
 
+    @staticmethod
+    def _input_messages(msg: GroupMessageInput) -> tuple[GroupBufferedMessage, ...]:
+        if msg.buffered_messages:
+            return tuple(item for item in msg.buffered_messages if item.text.strip())
+        text = msg.text.strip()
+        if not text:
+            return ()
+        return (GroupBufferedMessage(msg.user_id, msg.nickname, text, msg.mentions_bot),)
+
+    @staticmethod
+    def _classification_text(messages: tuple[GroupBufferedMessage, ...]) -> str:
+        if len(messages) == 1:
+            return messages[0].text.strip()
+        return "\n".join(f"{item.nickname or item.user_id}: {item.text.strip()}" for item in messages if item.text.strip())
+
     def _can_chat(self, group_id: int, *, mentions_bot: bool) -> bool:
         if not self._chat_available():
             return False
@@ -232,6 +272,16 @@ class GroupMessageService:
             return True
         last = self._last_chat_reply_at.get(group_id, 0)
         return time.monotonic() - last >= self.config.group_chat.chat_cooldown_seconds
+
+    @staticmethod
+    def _should_explain(classification: Classification, *, mentions_bot: bool) -> bool:
+        if mentions_bot:
+            return True
+        if classification.action not in {"answer_question", "reply"}:
+            return False
+        if classification.kind != "project_question":
+            return False
+        return classification.confidence >= PASSIVE_REPLY_CONFIDENCE
 
     def _chat_available(self) -> bool:
         return self.config.group_chat.chat_enabled and self.config.llm.enabled and self.chat_client is not None

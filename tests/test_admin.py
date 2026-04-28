@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -114,6 +115,16 @@ class FakeQQAPI:
         self.group_messages.append((group_id, kwargs))
 
 
+class FakeDebounceRuntime:
+    def __init__(self):
+        self.config = SimpleNamespace(group_chat=SimpleNamespace(debounce_seconds=0))
+        self.messages = []
+
+    async def handle_group_message(self, msg):
+        self.messages.append(msg)
+        return SimpleNamespace(reply=None, mention_admin_id=None, reason="test")
+
+
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -184,6 +195,25 @@ async def test_plugin_sends_messages_through_ncatbot_qq_api() -> None:
 
     assert qq.private_messages == [(123, {"text": "私聊"})]
     assert qq.group_messages == [(456, {"text": "群聊", "at": 789})]
+
+
+@pytest.mark.asyncio
+async def test_plugin_debounces_group_messages_as_buffered_messages() -> None:
+    plugin = object.__new__(DoraOpsPlugin)
+    runtime = FakeDebounceRuntime()
+    plugin.runtime = runtime
+
+    await plugin._enqueue_group_message(group_id=456, user_id=1, nickname="a", text="多萝", mentions_bot=True)
+    await plugin._enqueue_group_message(group_id=456, user_id=2, nickname="b", text="补充", mentions_bot=False)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert len(runtime.messages) == 1
+    msg = runtime.messages[0]
+    assert msg.user_id == 2
+    assert msg.mentions_bot is True
+    assert [item.text for item in msg.buffered_messages] == ["多萝", "补充"]
+    assert [item.user_id for item in msg.buffered_messages] == [1, 2]
 
 
 @pytest.mark.asyncio
