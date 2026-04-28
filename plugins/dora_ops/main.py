@@ -15,7 +15,6 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
 
 from dora_ops.runtime import DoraOpsRuntime
 from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupMessageInput
-from dora_ops.jobs import JobManager
 from dora_ops.llm import LLMError
 from dora_ops.models import JobStatus
 
@@ -193,6 +192,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                                 f"{DORA_PERSONA_PROMPT}\n\n"
                                 "# 昨日进展总结任务\n"
                                 "- 你正在把多个仓库的 opencode 分析结果整理成 QQ 群里的最终日报。\n"
+                                "- 输入里的 opencode_output 是原始文本，可能是 JSON、Markdown 或普通文本，不要依赖固定 schema。\n"
                                 "- 只输出面向群友的中文总结，不输出 JSON、Markdown 代码块或原始字段名。\n"
                                 "- 重点写用户可见变化、开发者需要关注的风险、建议动作；无提交的仓库一句话带过。\n"
                                 "- 控制在 8 条以内，语气保持多萝人格，但不要影响信息准确性。\n"
@@ -222,19 +222,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             status = str(job.get("status") or "-")
             entry: dict[str, object] = {"job_id": job_id, "repo": repo, "status": status}
             if status == JobStatus.SUCCEEDED.value:
-                analysis = self._normalize_analysis(JobManager._read_analysis(Path(str(job["output_path"]))))
-                entry.update(
-                    {
-                        "summary": analysis.get("summary") or analysis.get("announcement") or "分析完成",
-                        "commits": analysis.get("commits") or [],
-                        "user_visible_changes": analysis.get("user_visible_changes") or [],
-                        "developer_notes": analysis.get("developer_notes") or [],
-                        "risks": analysis.get("risks") or [],
-                        "recommended_actions": analysis.get("recommended_actions") or [],
-                        "announcement": analysis.get("announcement") or "",
-                        "should_notify_group": analysis.get("should_notify_group"),
-                    }
-                )
+                entry["opencode_output"] = self._read_text(Path(str(job["output_path"])), limit=12000)
             elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
                 entry["error"] = str(job.get("error") or status)
             entries.append(entry)
@@ -258,16 +246,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 lines.append(f"- {repo}: missing")
                 continue
             if status == JobStatus.SUCCEEDED.value:
-                lines.append(f"- {repo}: {DoraOpsPlugin._clip(str(entry.get('summary') or '分析完成'), 260)}")
-                changes = DoraOpsPlugin._string_list(entry.get("user_visible_changes"))
-                if changes:
-                    lines.append(f"  用户可见：{DoraOpsPlugin._clip('；'.join(changes), 320)}")
-                risks = DoraOpsPlugin._string_list(entry.get("risks"))
-                if risks:
-                    lines.append(f"  风险：{DoraOpsPlugin._clip('；'.join(risks), 220)}")
-                actions = DoraOpsPlugin._string_list(entry.get("recommended_actions"))
-                if actions:
-                    lines.append(f"  建议：{DoraOpsPlugin._clip('；'.join(actions), 220)}")
+                output = str(entry.get("opencode_output") or "分析完成")
+                lines.append(f"- {repo}: {DoraOpsPlugin._clip(output, 600)}")
             elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
                 error = str(entry.get("error") or status)
                 lines.append(f"- {repo}: {status}\n  {DoraOpsPlugin._clip(error, 500)}")
@@ -276,38 +256,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         return "\n".join(lines)
 
     @staticmethod
-    def _normalize_analysis(analysis: dict[str, object]) -> dict[str, object]:
-        for key in ("raw", "summary"):
-            value = analysis.get(key)
-            if isinstance(value, str):
-                parsed = DoraOpsPlugin._parse_jsonish(value)
-                if parsed is not None:
-                    return parsed
-        return analysis
-
-    @staticmethod
-    def _parse_jsonish(text: str) -> dict[str, object] | None:
-        stripped = text.strip()
-        if stripped.startswith("```"):
-            stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", stripped)
-            stripped = re.sub(r"\s*```$", "", stripped).strip()
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            stripped = stripped[start : end + 1]
-        try:
-            value = json.loads(stripped)
-        except json.JSONDecodeError:
-            return None
-        return value if isinstance(value, dict) else None
-
-    @staticmethod
-    def _string_list(value: object) -> list[str]:
-        if isinstance(value, list):
-            return [str(item) for item in value if str(item).strip()]
-        if isinstance(value, str) and value.strip():
-            return [value]
-        return []
+    def _read_text(path: Path, *, limit: int) -> str:
+        if not path.exists():
+            return "分析完成，但没有输出文件"
+        return path.read_text(encoding="utf-8", errors="replace").strip()[:limit]
 
     @staticmethod
     def _clip(text: str, limit: int) -> str:

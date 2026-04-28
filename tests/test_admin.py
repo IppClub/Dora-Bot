@@ -142,7 +142,7 @@ def test_daily_summary_group_ids_fall_back_to_enabled_group_chat() -> None:
 
 
 @pytest.mark.asyncio
-async def test_progress_results_use_llm_summary_for_structured_job_output(tmp_path: Path) -> None:
+async def test_progress_results_send_raw_output_to_llm_summary(tmp_path: Path) -> None:
     output = tmp_path / "output.json"
     output.write_text(
         """```json
@@ -179,12 +179,12 @@ async def test_progress_results_use_llm_summary_for_structured_job_output(tmp_pa
     assert len(fake.calls) == 1
     payload = fake.calls[0][1]["content"]
     assert "版本升级至 1.7.7" in payload
-    assert "user_visible_changes" in payload
-    assert "```json" not in payload
+    assert "opencode_output" in payload
+    assert "```json" in payload
 
 
 @pytest.mark.asyncio
-async def test_progress_results_fallback_avoids_raw_json_dump(tmp_path: Path) -> None:
+async def test_progress_results_fallback_clips_raw_output(tmp_path: Path) -> None:
     output = tmp_path / "output.json"
     output.write_text(
         """```json
@@ -217,9 +217,9 @@ async def test_progress_results_fallback_avoids_raw_json_dump(tmp_path: Path) ->
     )
 
     assert "昨日无提交" in result
-    assert "风险：连续 3 天无提交" in result
-    assert "```json" not in result
-    assert '"summary"' not in result
+    assert "连续 3 天无提交" in result
+    assert "```json" in result
+    assert '"summary"' in result
 
 
 @pytest.mark.asyncio
