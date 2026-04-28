@@ -58,12 +58,13 @@ llm:
 
 
 class FakeChatClient:
-    def __init__(self):
+    def __init__(self, reply: str = "LLM 多轮回复"):
+        self.reply = reply
         self.calls: list[list[dict[str, str]]] = []
 
     async def complete(self, messages: list[dict[str, str]]) -> str:
         self.calls.append(messages)
-        return "LLM 多轮回复"
+        return self.reply
 
 
 @pytest.mark.asyncio
@@ -138,6 +139,87 @@ def test_daily_summary_group_ids_fall_back_to_enabled_group_chat() -> None:
     )
 
     assert plugin._daily_summary_group_ids() == [456, 789]
+
+
+@pytest.mark.asyncio
+async def test_progress_results_use_llm_summary_for_structured_job_output(tmp_path: Path) -> None:
+    output = tmp_path / "output.json"
+    output.write_text(
+        """```json
+{
+  "summary": "版本升级至 1.7.7，Agent 系统增强。",
+  "commits": ["8381194c2 Refine agent handoff and LLM configuration"],
+  "user_visible_changes": ["版本号从 1.7.6 升级到 1.7.7", "Agent 面板新增变更集"],
+  "developer_notes": ["修复 DB 查询 double 值截断"],
+  "risks": ["需要验证配置兼容性"],
+  "recommended_actions": ["发布前跑一轮回归"],
+  "announcement": "",
+  "should_notify_group": true
+}
+```""",
+        encoding="utf-8",
+    )
+    fake = FakeChatClient("多萝整理版日报")
+    plugin = object.__new__(DoraOpsPlugin)
+    plugin.runtime = SimpleNamespace(admin=SimpleNamespace(chat_client=fake), group_chat=SimpleNamespace(chat_client=None))
+
+    result = await plugin._format_progress_results(
+        [1],
+        {
+            1: {
+                "id": 1,
+                "status": JobStatus.SUCCEEDED.value,
+                "tmux_session": "dora_job_123_dora_ssr_progress",
+                "output_path": str(output),
+            }
+        },
+    )
+
+    assert result == "多萝整理版日报"
+    assert len(fake.calls) == 1
+    payload = fake.calls[0][1]["content"]
+    assert "版本升级至 1.7.7" in payload
+    assert "user_visible_changes" in payload
+    assert "```json" not in payload
+
+
+@pytest.mark.asyncio
+async def test_progress_results_fallback_avoids_raw_json_dump(tmp_path: Path) -> None:
+    output = tmp_path / "output.json"
+    output.write_text(
+        """```json
+{
+  "summary": "昨日无提交，仓库无变更。",
+  "commits": [],
+  "user_visible_changes": [],
+  "developer_notes": ["最近一次提交为 2026-04-24"],
+  "risks": ["连续 3 天无提交"],
+  "recommended_actions": ["确认是否有待合并分支"],
+  "announcement": "",
+  "should_notify_group": false
+}
+```""",
+        encoding="utf-8",
+    )
+    plugin = object.__new__(DoraOpsPlugin)
+    plugin.runtime = SimpleNamespace(admin=SimpleNamespace(chat_client=None), group_chat=SimpleNamespace(chat_client=None))
+
+    result = await plugin._format_progress_results(
+        [1],
+        {
+            1: {
+                "id": 1,
+                "status": JobStatus.SUCCEEDED.value,
+                "tmux_session": "dora_job_123_yuescript_progress",
+                "output_path": str(output),
+            }
+        },
+    )
+
+    assert "昨日无提交" in result
+    assert "风险：连续 3 天无提交" in result
+    assert "```json" not in result
+    assert '"summary"' not in result
 
 
 @pytest.mark.asyncio

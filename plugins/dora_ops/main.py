@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 import re
 from typing import Awaitable, Callable
@@ -13,8 +14,9 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
     registrar = None  # type: ignore[assignment]
 
 from dora_ops.runtime import DoraOpsRuntime
-from dora_ops.group_chat import GroupMessageInput
+from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupMessageInput
 from dora_ops.jobs import JobManager
+from dora_ops.llm import LLMError
 from dora_ops.models import JobStatus
 
 
@@ -157,7 +159,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 await self.runtime.jobs.reconcile_job(job)
             jobs = await self._progress_jobs_by_id(job_ids)
             if len(jobs) == len(job_ids) and all(str(jobs[job_id].get("status")) in terminal for job_id in job_ids):
-                await send(self._format_progress_results(job_ids, jobs))
+                await send(await self._format_progress_results(job_ids, jobs))
                 return
             if asyncio.get_running_loop().time() >= deadline:
                 for job_id in job_ids:
@@ -169,7 +171,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                             "progress watcher timed out",
                         )
                 jobs = await self._progress_jobs_by_id(job_ids)
-                await send(self._format_progress_results(job_ids, jobs))
+                await send(await self._format_progress_results(job_ids, jobs))
                 return
             await asyncio.sleep(5)
 
@@ -178,26 +180,139 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         wanted = set(job_ids)
         return {int(job["id"]): job for job in jobs if int(job["id"]) in wanted}
 
-    @staticmethod
-    def _format_progress_results(job_ids: list[int], jobs: dict[int, dict[str, object]]) -> str:
-        lines = ["昨日进展分析结果："]
+    async def _format_progress_results(self, job_ids: list[int], jobs: dict[int, dict[str, object]]) -> str:
+        entries = self._progress_result_entries(job_ids, jobs)
+        client = self._progress_summary_chat_client()
+        if client is not None:
+            try:
+                reply = await client.complete(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                f"{DORA_PERSONA_PROMPT}\n\n"
+                                "# 昨日进展总结任务\n"
+                                "- 你正在把多个仓库的 opencode 分析结果整理成 QQ 群里的最终日报。\n"
+                                "- 只输出面向群友的中文总结，不输出 JSON、Markdown 代码块或原始字段名。\n"
+                                "- 重点写用户可见变化、开发者需要关注的风险、建议动作；无提交的仓库一句话带过。\n"
+                                "- 控制在 8 条以内，语气保持多萝人格，但不要影响信息准确性。\n"
+                                "- 如果有失败或超时任务，明确点名。不要声称执行了没有执行的操作。"
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps({"results": entries}, ensure_ascii=False, indent=2),
+                        },
+                    ]
+                )
+            except LLMError:
+                reply = ""
+            if reply.strip():
+                return reply.strip()
+        return self._format_progress_results_fallback(entries)
+
+    def _progress_result_entries(self, job_ids: list[int], jobs: dict[int, dict[str, object]]) -> list[dict[str, object]]:
+        entries: list[dict[str, object]] = []
         for job_id in job_ids:
             job = jobs.get(job_id)
             if job is None:
-                lines.append(f"- job #{job_id}: missing")
+                entries.append({"job_id": job_id, "repo": f"job #{job_id}", "status": "missing"})
                 continue
-            repo = DoraOpsPlugin._repo_from_progress_session(str(job.get("tmux_session") or "")) or f"job #{job_id}"
+            repo = self._repo_from_progress_session(str(job.get("tmux_session") or "")) or f"job #{job_id}"
             status = str(job.get("status") or "-")
+            entry: dict[str, object] = {"job_id": job_id, "repo": repo, "status": status}
             if status == JobStatus.SUCCEEDED.value:
-                analysis = JobManager._read_analysis(Path(str(job["output_path"])))
-                summary = analysis.get("summary") or analysis.get("announcement") or analysis.get("raw") or "分析完成"
-                lines.append(f"- {repo}: succeeded\n  {str(summary)[:500]}")
+                analysis = self._normalize_analysis(JobManager._read_analysis(Path(str(job["output_path"]))))
+                entry.update(
+                    {
+                        "summary": analysis.get("summary") or analysis.get("announcement") or "分析完成",
+                        "commits": analysis.get("commits") or [],
+                        "user_visible_changes": analysis.get("user_visible_changes") or [],
+                        "developer_notes": analysis.get("developer_notes") or [],
+                        "risks": analysis.get("risks") or [],
+                        "recommended_actions": analysis.get("recommended_actions") or [],
+                        "announcement": analysis.get("announcement") or "",
+                        "should_notify_group": analysis.get("should_notify_group"),
+                    }
+                )
             elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
-                error = str(job.get("error") or status)
-                lines.append(f"- {repo}: {status}\n  {error[:500]}")
+                entry["error"] = str(job.get("error") or status)
+            entries.append(entry)
+        return entries
+
+    def _progress_summary_chat_client(self):
+        admin = getattr(self.runtime, "admin", None)
+        client = getattr(admin, "chat_client", None)
+        if client is not None:
+            return client
+        group_chat = getattr(self.runtime, "group_chat", None)
+        return getattr(group_chat, "chat_client", None)
+
+    @staticmethod
+    def _format_progress_results_fallback(entries: list[dict[str, object]]) -> str:
+        lines = ["昨日进展分析结果："]
+        for entry in entries:
+            repo = str(entry.get("repo") or f"job #{entry.get('job_id')}")
+            status = str(entry.get("status") or "-")
+            if status == "missing":
+                lines.append(f"- {repo}: missing")
+                continue
+            if status == JobStatus.SUCCEEDED.value:
+                lines.append(f"- {repo}: {DoraOpsPlugin._clip(str(entry.get('summary') or '分析完成'), 260)}")
+                changes = DoraOpsPlugin._string_list(entry.get("user_visible_changes"))
+                if changes:
+                    lines.append(f"  用户可见：{DoraOpsPlugin._clip('；'.join(changes), 320)}")
+                risks = DoraOpsPlugin._string_list(entry.get("risks"))
+                if risks:
+                    lines.append(f"  风险：{DoraOpsPlugin._clip('；'.join(risks), 220)}")
+                actions = DoraOpsPlugin._string_list(entry.get("recommended_actions"))
+                if actions:
+                    lines.append(f"  建议：{DoraOpsPlugin._clip('；'.join(actions), 220)}")
+            elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
+                error = str(entry.get("error") or status)
+                lines.append(f"- {repo}: {status}\n  {DoraOpsPlugin._clip(error, 500)}")
             else:
                 lines.append(f"- {repo}: {status}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _normalize_analysis(analysis: dict[str, object]) -> dict[str, object]:
+        for key in ("raw", "summary"):
+            value = analysis.get(key)
+            if isinstance(value, str):
+                parsed = DoraOpsPlugin._parse_jsonish(value)
+                if parsed is not None:
+                    return parsed
+        return analysis
+
+    @staticmethod
+    def _parse_jsonish(text: str) -> dict[str, object] | None:
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", stripped)
+            stripped = re.sub(r"\s*```$", "", stripped).strip()
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            stripped = stripped[start : end + 1]
+        try:
+            value = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _string_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            return [str(item) for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value]
+        return []
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        text = " ".join(text.split())
+        return text if len(text) <= limit else f"{text[:limit].rstrip()}..."
 
     @staticmethod
     def _repo_from_progress_session(session: str) -> str | None:
