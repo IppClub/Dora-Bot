@@ -57,6 +57,8 @@ class LLMConfig(BaseModel):
     enabled: bool = False
     classifier: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
     summarizer: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
+    chat: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
+    max_context_messages: int = Field(default=20, ge=1)
 
 
 class SchedulerConfig(BaseModel):

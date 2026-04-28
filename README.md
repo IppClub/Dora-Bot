@@ -22,12 +22,18 @@ Model configuration:
 ```yaml
 llm:
   enabled: false
+  max_context_messages: 20
   classifier:
     provider: openai-compatible
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
     model: deepseek-chat
   summarizer:
+    provider: openai-compatible
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+  chat:
     provider: openai-compatible
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
@@ -89,7 +95,7 @@ The first implemented NcatBot surface is the admin test console. These commands 
 - `/approve feedback <id>`
 - `/reject feedback <id>`
 
-Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related feedback is recorded, and messages that need repository analysis create a pending approval that can be approved with `/approve feedback <id>`.
+Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related feedback is recorded, and messages that need repository analysis create a pending approval that can be approved with `/approve feedback <id>`. Private-chat history is stored and, when `llm.enabled: true`, the chat model receives the most recent `llm.max_context_messages` messages.
 
 `/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path from private chat. Pass the target group id explicitly.
 

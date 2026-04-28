@@ -31,6 +31,30 @@ repositories:
 """
 
 
+LLM_CONFIG = CONFIG + """
+llm:
+  enabled: true
+  max_context_messages: 2
+  chat:
+    provider: openai-compatible
+    base_url: https://example.invalid
+    api_key_env: TEST_API_KEY
+    model: test-model
+    temperature: 0.1
+    max_tokens: 128
+    timeout_seconds: 5
+"""
+
+
+class FakeChatClient:
+    def __init__(self):
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def complete(self, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        return "LLM 多轮回复"
+
+
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -87,6 +111,9 @@ async def test_admin_private_chat_records_feedback_and_approval(tmp_path: Path) 
     assert approval is not None
     assert approval["requested_group_id"] is None
     assert approval["command"] == "/approve feedback 1"
+    messages = await runtime.storage.list_recent_chat_messages("private:123", 10)
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[0]["content"] == "Dora SSR Web IDE 创建文件后无法刷新"
 
 
 @pytest.mark.asyncio
@@ -111,6 +138,28 @@ async def test_admin_private_chat_greeting_shows_capabilities(tmp_path: Path) ->
     assert "你好" in result
     assert "/test" in result
     assert "/approve feedback <id>" in result
+
+
+@pytest.mark.asyncio
+async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    fake = FakeChatClient()
+    runtime.admin.chat_client = fake  # type: ignore[assignment]
+
+    first = await runtime.handle_admin_text("Dora SSR Web IDE 无法刷新", user_id=123)
+    assert first == "LLM 多轮回复"
+    second = await runtime.handle_admin_text("继续说明一下", user_id=123)
+    assert second == "LLM 多轮回复"
+
+    assert len(fake.calls) == 2
+    last_call = fake.calls[-1]
+    chat_messages = [message for message in last_call if message["role"] in {"user", "assistant"}]
+    assert chat_messages == [
+        {"role": "assistant", "content": "LLM 多轮回复"},
+        {"role": "user", "content": "继续说明一下"},
+    ]
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,7 @@ jobs:
 
 llm:
   enabled: false
+  max_context_messages: 20
   classifier:
     provider: openai-compatible
     base_url: https://api.deepseek.com
@@ -68,6 +69,14 @@ llm:
     model: deepseek-chat
     temperature: 0.2
     max_tokens: 2048
+    timeout_seconds: 60
+  chat:
+    provider: openai-compatible
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+    temperature: 0.3
+    max_tokens: 1024
     timeout_seconds: 60
 
 scheduler:

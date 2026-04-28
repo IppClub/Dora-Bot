@@ -101,6 +101,17 @@ create table if not exists scheduler_state(
   last_run_date text,
   last_run_at integer
 );
+
+create table if not exists chat_message(
+  id integer primary key autoincrement,
+  conversation_key text not null,
+  role text not null,
+  content text not null,
+  created_at integer not null
+);
+
+create index if not exists idx_chat_message_conversation_id
+on chat_message(conversation_key, id);
 """
 
 
@@ -317,6 +328,37 @@ class Storage:
             )
             await db.commit()
             return int(cursor.lastrowid)
+
+    async def append_chat_message(self, conversation_key: str, role: str, content: str) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                insert into chat_message(conversation_key, role, content, created_at)
+                values (?, ?, ?, ?)
+                """,
+                (conversation_key, role, content, int(time.time())),
+            )
+            await db.commit()
+            return int(cursor.lastrowid)
+
+    async def list_recent_chat_messages(self, conversation_key: str, limit: int) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (
+                await db.execute(
+                    """
+                    select * from (
+                      select * from chat_message
+                      where conversation_key=?
+                      order by id desc
+                      limit ?
+                    )
+                    order by id asc
+                    """,
+                    (conversation_key, limit),
+                )
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     async def get_feedback(self, feedback_id: int) -> dict[str, Any] | None:
         async with aiosqlite.connect(self.db_path) as db:

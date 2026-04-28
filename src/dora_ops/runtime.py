@@ -6,6 +6,7 @@ from .admin import AdminCommands
 from .config import BotConfig, load_config, resolve_path
 from .group_chat import GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
+from .llm import OpenAICompatibleChatClient
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
@@ -20,7 +21,8 @@ class DoraOpsRuntime:
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
         self.group_chat = GroupMessageService(config, storage)
-        self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries, self.group_chat)
+        chat_client = OpenAICompatibleChatClient(config.llm.chat) if config.llm.enabled else None
+        self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries, self.group_chat, chat_client)
 
     @classmethod
     async def create(cls, config_path: str | Path = "dora-bot.yaml") -> "DoraOpsRuntime":

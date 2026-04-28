@@ -7,6 +7,7 @@ from .classifier import classify_text
 from .config import BotConfig
 from .group_chat import GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
+from .llm import LLMError, OpenAICompatibleChatClient
 from .prompts import feedback_analysis_prompt, repo_diff_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
@@ -32,6 +33,7 @@ class AdminCommands:
         jobs: JobManager,
         summaries: SummaryService,
         group_chat: GroupMessageService,
+        chat_client: OpenAICompatibleChatClient | None = None,
     ):
         self.base_dir = base_dir
         self.config = config
@@ -40,6 +42,7 @@ class AdminCommands:
         self.jobs = jobs
         self.summaries = summaries
         self.group_chat = group_chat
+        self.chat_client = chat_client
 
     def is_admin(self, user_id: int, group_id: int | None = None) -> bool:
         if user_id in self.config.admin.user_ids:
@@ -198,16 +201,39 @@ class AdminCommands:
         normalized = text.strip()
         if not normalized:
             return None
+        conversation_key = self._private_conversation_key(user_id)
+        await self.storage.append_chat_message(conversation_key, "user", normalized)
         if self._is_greeting(normalized):
-            return "你好，我可以记录 Dora SSR 或 YueScript 的问题，也可以执行 /test、/approvals、/approve feedback <id> 等管理员命令。"
+            reply = "你好，我可以记录 Dora SSR 或 YueScript 的问题，也可以执行 /test、/approvals、/approve feedback <id> 等管理员命令。"
+            await self.storage.append_chat_message(conversation_key, "assistant", reply)
+            return reply
         classification = classify_text(normalized)
+        side_effect_note = await self._record_private_chat_feedback(
+            normalized,
+            user_id=user_id,
+            classification=classification,
+        )
+        if self.config.llm.enabled and self.chat_client is not None:
+            try:
+                reply = await self._llm_private_chat_reply(
+                    conversation_key,
+                    side_effect_note=side_effect_note,
+                )
+            except LLMError as exc:
+                reply = f"LLM 回复失败：{exc}\n{self._fallback_private_chat_reply(classification, side_effect_note)}"
+            await self.storage.append_chat_message(conversation_key, "assistant", reply)
+            return reply
+
+        reply = self._fallback_private_chat_reply(classification, side_effect_note)
+        await self.storage.append_chat_message(conversation_key, "assistant", reply)
+        return reply
+
+    async def _record_private_chat_feedback(self, text: str, *, user_id: int, classification) -> str | None:
         if not classification.should_accept:
-            if classification.project:
-                return "看起来和项目有关，但信息还不够。请补充报错全文、平台、版本和最小复现。"
-            return "这条我先不归档。要记录 Dora SSR 或 YueScript 的问题，请把报错、平台和复现步骤一起发。"
+            return None
 
         feedback_id = await self.storage.create_feedback(
-            original_text=normalized,
+            original_text=text,
             group_id=None,
             user_id=user_id,
             project=classification.project,
@@ -216,7 +242,7 @@ class AdminCommands:
             normalized_summary=classification.summary,
         )
         if not classification.needs_repo_analysis:
-            return f"收到，已记录为 #{feedback_id}。"
+            return f"已记录为 #{feedback_id}。"
 
         existing = await self.storage.get_pending_approval("feedback", feedback_id)
         approval_id = int(existing["id"]) if existing is not None else await self.storage.create_approval_request(
@@ -226,10 +252,44 @@ class AdminCommands:
             requested_group_id=None,
             command=f"/approve feedback {feedback_id}",
         )
-        return (
-            f"收到，已记录为 #{feedback_id}。这个像是 {classification.project or '项目'} 的有效问题，"
-            f"发送 /approve feedback {feedback_id} 可批准深度分析。审批 #{approval_id}。"
+        return f"已记录为 #{feedback_id}，可发送 /approve feedback {feedback_id} 批准深度分析。审批 #{approval_id}。"
+
+    def _fallback_private_chat_reply(self, classification, side_effect_note: str | None) -> str:
+        if not classification.should_accept:
+            if classification.project:
+                return "看起来和项目有关，但信息还不够。请补充报错全文、平台、版本和最小复现。"
+            return "这条我先不归档。要记录 Dora SSR 或 YueScript 的问题，请把报错、平台和复现步骤一起发。"
+
+        if not classification.needs_repo_analysis:
+            return f"收到，{side_effect_note or '已记录。'}"
+
+        return f"收到，这个像是 {classification.project or '项目'} 的有效问题，{side_effect_note or '可批准深度分析。'}"
+
+    async def _llm_private_chat_reply(self, conversation_key: str, *, side_effect_note: str | None) -> str:
+        assert self.chat_client is not None
+        recent = await self.storage.list_recent_chat_messages(
+            conversation_key,
+            self.config.llm.max_context_messages,
         )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是 Dora SSR 和 YueScript 项目的维护助手。"
+                    "使用简洁中文回复管理员。"
+                    "可以帮助记录反馈、说明审批命令、回答测试命令用法。"
+                    "不要声称已经执行未执行的操作。"
+                ),
+            }
+        ]
+        if side_effect_note:
+            messages.append({"role": "system", "content": f"本轮系统记录：{side_effect_note}"})
+        messages.extend({"role": str(row["role"]), "content": str(row["content"])} for row in recent)
+        return await self.chat_client.complete(messages)
+
+    @staticmethod
+    def _private_conversation_key(user_id: int) -> str:
+        return f"private:{user_id}"
 
     @staticmethod
     def _is_greeting(text: str) -> bool:
