@@ -164,6 +164,18 @@ class JobManager:
         job_id = int(job["id"])
         done_path = Path(str(job["done_path"]))
         if not done_path.exists():
+            if str(job.get("status") or "") == JobStatus.RUNNING.value:
+                session = str(job.get("tmux_session") or "")
+                if session and not await self._tmux_session_exists(session):
+                    error = "tmux session ended before writing job completion marker"
+                    await self.storage.update_job_status(job_id, JobStatus.FAILED, error)
+                    if job.get("target_type") == "repo_change" and job.get("target_id"):
+                        await self.storage.update_repo_change_status(
+                            int(job["target_id"]),
+                            ChangeStatus.FAILED,
+                            summary=error,
+                        )
+                    return JobStatus.FAILED
             return None
 
         exit_code_path = Path(str(job["exit_code_path"]))
@@ -193,7 +205,7 @@ class JobManager:
         root.mkdir(parents=True, exist_ok=True)
         path = root / f"{prefix}_{int(time.time() * 1000)}"
         path.mkdir(parents=True, exist_ok=False)
-        return path
+        return path.resolve()
 
     async def _start_tmux_job(
         self,
@@ -225,6 +237,19 @@ class JobManager:
             await self.storage.update_job_status(job_id, JobStatus.FAILED, error)
             raise RuntimeError(error)
         await self.storage.update_job_status(job_id, JobStatus.RUNNING)
+
+    @staticmethod
+    async def _tmux_session_exists(session: str) -> bool:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux",
+            "has-session",
+            "-t",
+            session,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
+        return proc.returncode == 0
 
     @staticmethod
     def _read_analysis(path: Path) -> dict[str, object]:

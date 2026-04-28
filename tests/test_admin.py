@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from dora_ops.models import JobStatus
 from dora_ops.runtime import DoraOpsRuntime
 
 
@@ -166,3 +167,46 @@ async def test_job_status_reconciles_and_shows_output_summary(tmp_path: Path) ->
     assert result is not None
     assert "daily_progress succeeded" in result
     assert "结果：昨日没有用户可见变更。" in result
+
+
+@pytest.mark.asyncio
+async def test_job_status_marks_missing_done_finished_tmux_as_failed(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    prompt = job_dir / "prompt.md"
+    output = job_dir / "output.json"
+    error = job_dir / "error.log"
+    exit_code = job_dir / "exit_code"
+    done = job_dir / "done"
+    prompt.write_text("prompt", encoding="utf-8")
+    output.write_text("", encoding="utf-8")
+    error.write_text("", encoding="utf-8")
+    exit_code.write_text("", encoding="utf-8")
+    job_id = await runtime.storage.create_job(
+        kind="daily_progress",
+        target_type="repository",
+        target_id=None,
+        tmux_session="missing_session",
+        prompt_path=prompt,
+        output_path=output,
+        error_path=error,
+        exit_code_path=exit_code,
+        done_path=done,
+        is_test=True,
+        triggered_by="123",
+        trigger_source="admin_command",
+    )
+    await runtime.storage.update_job_status(job_id, JobStatus.RUNNING)
+
+    async def fake_tmux_session_exists(_session: str) -> bool:
+        return False
+
+    runtime.jobs._tmux_session_exists = fake_tmux_session_exists  # type: ignore[method-assign]
+
+    result = await runtime.handle_admin_text("/test job-status --include-test", user_id=123)
+    assert result is not None
+    assert "daily_progress failed" in result
+    assert "tmux session ended before writing job completion marker" in result
