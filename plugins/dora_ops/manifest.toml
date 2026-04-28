@@ -1,0 +1,5 @@
+[plugin]
+name = "dora_ops"
+version = "0.1.0"
+description = "Dora SSR/YueScript maintainer assistant"
+author = "Dora"

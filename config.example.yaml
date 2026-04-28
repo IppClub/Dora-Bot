@@ -1,0 +1,40 @@
+paths:
+  data_dir: data
+  mirror_dir: mirrors
+  job_dir: jobs
+  summary_dir: summaries
+
+admin:
+  user_ids: []
+  group_ids: []
+
+repositories:
+  dora_ssr:
+    name: Dora SSR
+    remote: https://gitcode.com/ippclub/Dora-SSR.git
+    default_branch: main
+    watch_tags: true
+    watch_paths:
+      - Assets/Doc
+      - Assets/Script/Lib/Dora
+      - Tools/dora-cli
+      - Source
+      - .github/workflows
+  yuescript:
+    name: YueScript
+    remote: https://gitcode.com/ippclub/YueScript.git
+    default_branch: main
+    watch_tags: true
+    watch_paths:
+      - src
+      - spec
+      - doc
+      - docs
+
+jobs:
+  max_runtime_seconds: 600
+  opencode_command: opencode run
+
+scheduler:
+  daily_summary_time: "23:00"
+  timezone: Asia/Shanghai
