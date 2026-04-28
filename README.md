@@ -87,7 +87,7 @@ The first implemented NcatBot surface is the admin test console. These commands 
 - `/approve feedback <id>`
 - `/reject feedback <id>`
 
-`/test tmux` and `/test opencode ...` create asynchronous jobs under `jobs/`. Job output is reconciled by the core `JobManager`; the bot stores the tracked repository change first and fills in analysis results later.
+`/test repo-check ...`, `/test tmux`, and `/test opencode ...` create asynchronous jobs under `jobs/`. `/test repo-check ...` asks opencode to analyze commits from the last 24 hours in the configured local repository path. `/test job-status --include-test` reconciles finished jobs and shows the output summary when available.
 
 When group chat records a feedback item that needs deeper repository analysis, it creates a pending approval. Admins approve or reject it in private chat:
 
