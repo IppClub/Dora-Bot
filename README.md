@@ -125,9 +125,10 @@ repositories:
 
 scheduler:
   daily_summary_time: "08:00"
+  daily_summary_group_ids: [123456789]
 ```
 
-At the scheduled time the bot creates one opencode job per repository. Each job runs in the repository directory, executes `git pull -f origin <branch>`, then asks opencode to analyze yesterday's changes.
+At the scheduled time the bot creates one opencode job per repository. Each job runs in the repository directory, executes `git pull -f origin <branch>`, then asks opencode to analyze yesterday's changes. After all progress jobs succeed, fail, or time out, the plugin sends the final `昨日进展分析结果` to `scheduler.daily_summary_group_ids`. If that list is empty, it falls back to `group_chat.enabled_group_ids`.
 
 Manual test trigger:
 

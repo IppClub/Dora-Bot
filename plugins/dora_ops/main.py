@@ -36,7 +36,11 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             )
 
     async def daily_progress_report(self) -> None:
-        await self.runtime.summaries.create_yesterday_progress_jobs(self.runtime.jobs)
+        created = await self.runtime.summaries.create_yesterday_progress_jobs(self.runtime.jobs)
+        job_ids = [job_id for _, job_id in created]
+        group_ids = self._daily_summary_group_ids()
+        if job_ids and group_ids:
+            asyncio.create_task(self._watch_progress_jobs(job_ids, self._send_daily_progress_result_to_groups))
 
     if registrar is not None:
 
@@ -117,6 +121,16 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             return
         await self.api.post_group_msg(group_id, text=text)
 
+    def _daily_summary_group_ids(self) -> list[int]:
+        configured = self.runtime.config.scheduler.daily_summary_group_ids
+        if configured:
+            return sorted(configured)
+        return sorted(self.runtime.config.group_chat.enabled_group_ids)
+
+    async def _send_daily_progress_result_to_groups(self, text: str) -> None:
+        for group_id in self._daily_summary_group_ids():
+            await self._send_group_reply(group_id, text)
+
     def _maybe_watch_daily_progress(
         self,
         command_text: str,
@@ -142,7 +156,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             for job in jobs.values():
                 await self.runtime.jobs.reconcile_job(job)
             jobs = await self._progress_jobs_by_id(job_ids)
-            if all(str(jobs[job_id].get("status")) in terminal for job_id in job_ids if job_id in jobs):
+            if len(jobs) == len(job_ids) and all(str(jobs[job_id].get("status")) in terminal for job_id in job_ids):
                 await send(self._format_progress_results(job_ids, jobs))
                 return
             if asyncio.get_running_loop().time() >= deadline:

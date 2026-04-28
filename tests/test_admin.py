@@ -1,9 +1,20 @@
+import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from dora_ops.models import JobStatus
 from dora_ops.runtime import DoraOpsRuntime
+
+
+PLUGIN_PATH = Path(__file__).resolve().parents[1] / "plugins" / "dora_ops" / "main.py"
+PLUGIN_SPEC = importlib.util.spec_from_file_location("dora_ops_plugin_main", PLUGIN_PATH)
+assert PLUGIN_SPEC is not None
+plugin_module = importlib.util.module_from_spec(PLUGIN_SPEC)
+assert PLUGIN_SPEC.loader is not None
+PLUGIN_SPEC.loader.exec_module(plugin_module)
+DoraOpsPlugin = plugin_module.DoraOpsPlugin
 
 
 CONFIG = """
@@ -85,6 +96,48 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
     result = await runtime.handle_admin_text("/test daily-summary --progress", user_id=123)
     assert result is not None
     assert "缺少" in result
+
+
+@pytest.mark.asyncio
+async def test_daily_progress_report_watches_configured_groups(monkeypatch) -> None:
+    class FakeSummaries:
+        async def create_yesterday_progress_jobs(self, jobs):
+            assert jobs == "jobs"
+            return [("dora_ssr", 1), ("yuescript", 2)]
+
+    plugin = object.__new__(DoraOpsPlugin)
+    plugin.runtime = SimpleNamespace(
+        summaries=FakeSummaries(),
+        jobs="jobs",
+        config=SimpleNamespace(
+            scheduler=SimpleNamespace(daily_summary_group_ids={456}),
+            group_chat=SimpleNamespace(enabled_group_ids={789}),
+        ),
+    )
+
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        coro.close()
+        return object()
+
+    monkeypatch.setattr(plugin_module.asyncio, "create_task", fake_create_task)
+    await plugin.daily_progress_report()
+
+    assert len(created_tasks) == 1
+
+
+def test_daily_summary_group_ids_fall_back_to_enabled_group_chat() -> None:
+    plugin = object.__new__(DoraOpsPlugin)
+    plugin.runtime = SimpleNamespace(
+        config=SimpleNamespace(
+            scheduler=SimpleNamespace(daily_summary_group_ids=set()),
+            group_chat=SimpleNamespace(enabled_group_ids={789, 456}),
+        )
+    )
+
+    assert plugin._daily_summary_group_ids() == [456, 789]
 
 
 @pytest.mark.asyncio

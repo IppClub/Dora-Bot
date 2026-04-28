@@ -66,6 +66,7 @@ class LLMConfig(BaseModel):
 class SchedulerConfig(BaseModel):
     daily_summary_time: str = "08:00"
     timezone: str = "Asia/Shanghai"
+    daily_summary_group_ids: set[int] = Field(default_factory=set)
 
 
 class BotConfig(BaseModel):

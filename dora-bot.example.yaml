@@ -84,3 +84,5 @@ llm:
 scheduler:
   daily_summary_time: "08:00"
   timezone: Asia/Shanghai
+  # Optional. If empty, scheduled daily progress results are sent to group_chat.enabled_group_ids.
+  daily_summary_group_ids: []
