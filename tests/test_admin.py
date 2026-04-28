@@ -101,6 +101,19 @@ async def test_admin_private_chat_replies_without_recording_unrelated(tmp_path: 
 
 
 @pytest.mark.asyncio
+async def test_admin_private_chat_greeting_shows_capabilities(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text("你好", user_id=123)
+    assert result is not None
+    assert "你好" in result
+    assert "/test" in result
+    assert "/approve feedback <id>" in result
+
+
+@pytest.mark.asyncio
 async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")

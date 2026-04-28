@@ -198,6 +198,8 @@ class AdminCommands:
         normalized = text.strip()
         if not normalized:
             return None
+        if self._is_greeting(normalized):
+            return "你好，我可以记录 Dora SSR 或 YueScript 的问题，也可以执行 /test、/approvals、/approve feedback <id> 等管理员命令。"
         classification = classify_text(normalized)
         if not classification.should_accept:
             if classification.project:
@@ -228,6 +230,11 @@ class AdminCommands:
             f"收到，已记录为 #{feedback_id}。这个像是 {classification.project or '项目'} 的有效问题，"
             f"发送 /approve feedback {feedback_id} 可批准深度分析。审批 #{approval_id}。"
         )
+
+    @staticmethod
+    def _is_greeting(text: str) -> bool:
+        normalized = text.strip().lower()
+        return normalized in {"你好", "您好", "hi", "hello", "hey", "哈喽", "嗨"}
 
     async def group_chat_test(self, group_id: int, *, user_id: int, text: str) -> GroupMessageResult | None:
         return await self.group_chat.handle(
