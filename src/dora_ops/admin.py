@@ -435,6 +435,13 @@ class AdminCommands:
             prompt,
             triggered_by=str(user_id),
         )
+        if feedback.get("group_id") is not None:
+            await self.storage.create_analysis_delivery(
+                job_id=job_id,
+                feedback_id=target_id,
+                group_id=int(feedback["group_id"]),
+                user_id=int(feedback["user_id"]) if feedback.get("user_id") is not None else None,
+            )
         await self.storage.decide_approval(int(approval["id"]), "approved", decided_by=user_id, note=f"job:{job_id}")
         return f"已批准反馈 #{target_id}，分析任务已创建：#{job_id}"
 

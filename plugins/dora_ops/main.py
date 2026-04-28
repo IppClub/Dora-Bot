@@ -24,6 +24,7 @@ from dora_ops.models import JobStatus
 
 PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
 PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
+APPROVED_FEEDBACK_JOB_PATTERN = re.compile(r"分析任务已创建：#(\d+)")
 logger = get_log("DoraOps") if get_log is not None else logging.getLogger(__name__)
 
 
@@ -76,6 +77,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             if result:
                 await event.reply(text=result)
                 self._maybe_watch_daily_progress(text, result, lambda message: event.reply(text=message))
+                self._maybe_watch_feedback_analysis(result)
 
         @registrar.qq.on_group_message()
         async def on_group_message(self, event) -> None:
@@ -113,6 +115,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                     result,
                     lambda message: self._send_private_reply(user_id, message),
                 )
+                self._maybe_watch_feedback_analysis(result)
 
         async def on_group_message(self, msg) -> None:
             text = self._message_text(msg)
@@ -197,6 +200,20 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         )
         if group_result and group_result.admin_notification:
             await self._send_admin_notifications(group_result.admin_notification)
+        if group_result and group_result.analysis_job_id and group_result.feedback_id:
+            await self.runtime.storage.create_analysis_delivery(
+                job_id=group_result.analysis_job_id,
+                feedback_id=group_result.feedback_id,
+                group_id=pending.group_id,
+                user_id=last.user_id,
+            )
+            asyncio.create_task(
+                self._watch_feedback_analysis_job(
+                    group_result.analysis_job_id,
+                    pending.group_id,
+                    last.user_id,
+                )
+            )
         if group_result and group_result.reply:
             await self._send_group_reply(pending.group_id, group_result.reply, group_result.mention_admin_id)
 
@@ -298,6 +315,74 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         for group_id in self._daily_summary_group_ids():
             await self._send_group_reply(group_id, text)
 
+    async def _watch_feedback_analysis_job(self, job_id: int, group_id: int, user_id: int) -> None:
+        deadline = asyncio.get_running_loop().time() + self.runtime.config.jobs.max_runtime_seconds + 30
+        terminal = {JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.TIMEOUT.value}
+        while True:
+            job = await self.runtime.storage.get_job(job_id)
+            if job is not None:
+                await self.runtime.jobs.reconcile_job(job)
+                job = await self.runtime.storage.get_job(job_id)
+            status = str(job.get("status") if job else "")
+            if job is not None and status in terminal:
+                text = await self._format_feedback_analysis_result(job)
+                await self._send_group_reply(group_id, text, at_user_id=user_id or None)
+                await self.runtime.storage.mark_analysis_delivered(job_id)
+                return
+            if asyncio.get_running_loop().time() >= deadline:
+                await self.runtime.storage.update_job_status(job_id, JobStatus.TIMEOUT, "feedback analysis watcher timed out")
+                job = await self.runtime.storage.get_job(job_id)
+                text = await self._format_feedback_analysis_result(job or {"id": job_id, "status": JobStatus.TIMEOUT.value, "error": "feedback analysis watcher timed out"})
+                await self._send_group_reply(group_id, text, at_user_id=user_id or None)
+                await self.runtime.storage.mark_analysis_delivered(job_id)
+                return
+            await asyncio.sleep(5)
+
+    async def _format_feedback_analysis_result(self, job: dict[str, object]) -> str:
+        status = str(job.get("status") or "-")
+        payload: dict[str, object] = {
+            "job_id": int(job.get("id") or 0),
+            "status": status,
+        }
+        if status == JobStatus.SUCCEEDED.value:
+            payload["opencode_output"] = self._read_text(Path(str(job["output_path"])), limit=12000)
+        elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
+            payload["error"] = str(job.get("error") or status)
+        client = self._progress_summary_chat_client()
+        if client is not None:
+            try:
+                reply = await client.complete(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                f"{DORA_PERSONA_PROMPT}\n\n"
+                                "# 反馈分析结果总结任务\n"
+                                "- 你正在把 opencode 对单条群聊反馈的分析结果整理成回复提问人的 QQ 消息。\n"
+                                "- 输入里的 opencode_output 是原始文本，可能是 JSON、Markdown 或普通文本，不要依赖固定 schema。\n"
+                                "- 只输出中文总结，不输出 JSON、Markdown 代码块或原始字段名。\n"
+                                "- 说明判断、可能原因、需要补充的信息和下一步建议；失败或超时要明确说明。\n"
+                                "- 控制在 5 条以内，语气保持多萝人格，但不要影响信息准确性。"
+                            ),
+                        },
+                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+                    ]
+                )
+            except LLMError:
+                reply = ""
+            if reply.strip():
+                return reply.strip()
+        return self._format_feedback_analysis_result_fallback(payload)
+
+    @staticmethod
+    def _format_feedback_analysis_result_fallback(payload: dict[str, object]) -> str:
+        status = str(payload.get("status") or "-")
+        if status == JobStatus.SUCCEEDED.value:
+            output = str(payload.get("opencode_output") or "分析完成")
+            return f"分析完成：{DoraOpsPlugin._clip(output, 900)}"
+        error = str(payload.get("error") or status)
+        return f"分析任务{status}：{DoraOpsPlugin._clip(error, 500)}"
+
     def _maybe_watch_daily_progress(
         self,
         command_text: str,
@@ -310,6 +395,23 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         if not job_ids:
             return
         asyncio.create_task(self._watch_progress_jobs(job_ids, send))
+
+    def _maybe_watch_feedback_analysis(self, result_text: str) -> None:
+        match = APPROVED_FEEDBACK_JOB_PATTERN.search(result_text)
+        if not match:
+            return
+        job_id = int(match.group(1))
+        asyncio.create_task(self._watch_deliverable_feedback_analysis_job(job_id))
+
+    async def _watch_deliverable_feedback_analysis_job(self, job_id: int) -> None:
+        delivery = await self.runtime.storage.get_analysis_delivery(job_id)
+        if delivery is None or delivery.get("delivered_at") is not None or delivery.get("group_id") is None:
+            return
+        await self._watch_feedback_analysis_job(
+            job_id,
+            int(delivery["group_id"]),
+            int(delivery["user_id"] or 0),
+        )
 
     async def _watch_progress_jobs(
         self,

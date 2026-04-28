@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time
 import logging
 import time
-from zoneinfo import ZoneInfo
 
 from .classifier import Classification, classify_text_with_llm
 from .config import BotConfig
+from .jobs import JobManager
 from .llm import LLMError, OpenAICompatibleChatClient
+from .prompts import feedback_analysis_prompt
+from .repo_tracker import RepoTracker
 from .storage import Storage
 
 
@@ -93,6 +94,7 @@ class GroupMessageResult:
     admin_notification: str | None = None
     mention_admin_id: int | None = None
     accepted_for_analysis: bool = False
+    analysis_job_id: int | None = None
     reason: str = ""
 
 
@@ -101,11 +103,15 @@ class GroupMessageService:
         self,
         config: BotConfig,
         storage: Storage,
+        tracker: RepoTracker,
+        jobs: JobManager,
         chat_client: OpenAICompatibleChatClient | None = None,
         classifier_client: OpenAICompatibleChatClient | None = None,
     ):
         self.config = config
         self.storage = storage
+        self.tracker = tracker
+        self.jobs = jobs
         self.chat_client = chat_client
         self.classifier_client = classifier_client
         self._last_chat_reply_at: dict[int, float] = {}
@@ -191,11 +197,19 @@ class GroupMessageService:
             )
 
         accepted_for_analysis = False
+        analysis_job_id: int | None = None
         approval_id: int | None = None
         reason = "not_needed"
         if classification.needs_repo_analysis:
-            if self.config.group_chat.auto_create_analysis_jobs:
-                accepted_for_analysis, reason = await self._check_and_record_quota(msg)
+            if feedback_id is not None and await self._can_auto_create_analysis():
+                analysis_job_id = await self._create_feedback_analysis_job(
+                    feedback_id=feedback_id,
+                    classification=classification,
+                    text=text,
+                    triggered_by=str(msg.user_id),
+                )
+                accepted_for_analysis = True
+                reason = "auto_accepted"
             else:
                 reason = "manual_required"
                 if feedback_id is not None:
@@ -247,14 +261,15 @@ class GroupMessageService:
                 reason,
             )
             return GroupMessageResult(
-                classification,
-                feedback_id,
-                approval_id,
-                None,
-                admin_notification,
-                mention_admin_id,
-                accepted_for_analysis,
-                reason,
+                classification=classification,
+                feedback_id=feedback_id,
+                approval_id=approval_id,
+                reply=None,
+                admin_notification=admin_notification,
+                mention_admin_id=mention_admin_id,
+                accepted_for_analysis=accepted_for_analysis,
+                analysis_job_id=analysis_job_id,
+                reason=reason,
             )
         await self.storage.append_chat_message(conversation_key, "assistant", reply)
         logger.info(
@@ -267,14 +282,15 @@ class GroupMessageService:
             len(reply),
         )
         return GroupMessageResult(
-            classification,
-            feedback_id,
-            approval_id,
-            reply,
-            admin_notification,
-            mention_admin_id,
-            accepted_for_analysis,
-            reason,
+            classification=classification,
+            feedback_id=feedback_id,
+            approval_id=approval_id,
+            reply=reply,
+            admin_notification=admin_notification,
+            mention_admin_id=mention_admin_id,
+            accepted_for_analysis=accepted_for_analysis,
+            analysis_job_id=analysis_job_id,
+            reason=reason,
         )
 
     def _contains_alias(self, text: str) -> bool:
@@ -360,24 +376,44 @@ class GroupMessageService:
             display = f"{display} @多萝"
         return f"{nickname or '群友'}：{display}"
 
-    async def _check_and_record_quota(self, msg: GroupMessageInput) -> tuple[bool, str]:
-        since = self._start_of_today()
-        group_key = f"group:{msg.group_id}:analysis"
-        user_key = f"user:{msg.user_id}:analysis"
-        group_used = await self.storage.count_quota_events(group_key, since)
-        if group_used >= self.config.group_chat.daily_group_analysis_limit:
-            return False, "group_quota_exceeded"
-        user_used = await self.storage.count_quota_events(user_key, since)
-        if user_used >= self.config.group_chat.daily_user_analysis_limit:
-            return False, "user_quota_exceeded"
-        await self.storage.record_quota_event(group_key, group_id=msg.group_id, user_id=msg.user_id, event_type="analysis")
-        await self.storage.record_quota_event(user_key, group_id=msg.group_id, user_id=msg.user_id, event_type="analysis")
-        return True, "accepted"
+    async def _can_auto_create_analysis(self) -> bool:
+        since = int(time.time()) - 24 * 60 * 60
+        used = await self.storage.count_jobs(kind="feedback_analysis", since_ts=since)
+        return used < self.config.group_chat.auto_analysis_24h_limit
 
-    def _start_of_today(self) -> int:
-        tz = ZoneInfo(self.config.scheduler.timezone)
-        now = datetime.now(tz)
-        return int(datetime.combine(now.date(), dt_time.min, tz).timestamp())
+    async def _create_feedback_analysis_job(
+        self,
+        *,
+        feedback_id: int,
+        classification: Classification,
+        text: str,
+        triggered_by: str,
+    ) -> int:
+        repo_key = self._repo_key_for_project(classification.project)
+        repo = self.config.repositories[repo_key]
+        mirror = await self.tracker.ensure_mirror(repo_key, repo)
+        prompt = feedback_analysis_prompt(
+            repo_name=repo.name,
+            project=classification.project,
+            kind=classification.kind,
+            title=classification.summary[:40],
+            original_text=text,
+        )
+        return await self.jobs.create_feedback_analysis(
+            repo_key,
+            mirror,
+            feedback_id,
+            prompt,
+            triggered_by=triggered_by,
+            trigger_source="group_auto_analysis",
+        )
+
+    @staticmethod
+    def _repo_key_for_project(project: object) -> str:
+        text = str(project or "").lower()
+        if "yue" in text:
+            return "yuescript"
+        return "dora_ssr"
 
     def _build_reply(
         self,
@@ -418,4 +454,6 @@ class GroupMessageService:
         if approval_id is not None:
             lines.append(f"审批：#{approval_id}")
             lines.append(f"批准分析：/approve feedback {feedback_id}")
+        elif reason == "auto_accepted":
+            lines.append("分析：已自动放行，等待串行任务完成")
         return "\n".join(lines)

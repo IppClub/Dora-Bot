@@ -19,9 +19,7 @@ group_chat:
   enabled_group_ids: []
   bot_aliases: [多萝, Dora]
   acknowledge_feedback: true
-  daily_group_analysis_limit: 1
-  daily_user_analysis_limit: 1
-  auto_create_analysis_jobs: false
+  auto_analysis_24h_limit: 0
 repositories:
   dora_ssr:
     name: Dora SSR

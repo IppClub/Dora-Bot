@@ -27,9 +27,7 @@ class GroupChatConfig(BaseModel):
     chat_enabled: bool = True
     debounce_seconds: float = Field(default=60.0, ge=0)
     chat_cooldown_seconds: int = Field(default=120, ge=0)
-    daily_group_analysis_limit: int = 3
-    daily_user_analysis_limit: int = 1
-    auto_create_analysis_jobs: bool = False
+    auto_analysis_24h_limit: int = 10
 
 
 class RepositoryConfig(BaseModel):

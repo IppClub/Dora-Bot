@@ -53,6 +53,7 @@ create table if not exists analysis_job(
   is_test integer not null default 0,
   triggered_by text,
   trigger_source text,
+  created_at integer not null default 0,
   started_at integer,
   finished_at integer,
   error text
@@ -96,6 +97,14 @@ create table if not exists approval_request(
   decision_note text
 );
 
+create table if not exists analysis_delivery(
+  job_id integer primary key,
+  feedback_id integer not null,
+  group_id integer,
+  user_id integer,
+  delivered_at integer
+);
+
 create table if not exists scheduler_state(
   job_name text primary key,
   last_run_date text,
@@ -123,6 +132,11 @@ class Storage:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(SCHEMA)
+            try:
+                await db.execute("alter table analysis_job add column created_at integer not null default 0")
+            except aiosqlite.OperationalError:
+                pass
+            await db.execute("update analysis_job set created_at=coalesce(nullif(created_at, 0), coalesce(started_at, finished_at, ?))", (int(time.time()),))
             await db.commit()
 
     async def upsert_repo_state(
@@ -245,9 +259,9 @@ class Storage:
                 insert into analysis_job(
                   kind, target_type, target_id, status, tmux_session, prompt_path,
                   output_path, error_path, exit_code_path, done_path,
-                  is_test, triggered_by, trigger_source
+                  is_test, triggered_by, trigger_source, created_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     kind,
@@ -263,6 +277,7 @@ class Storage:
                     int(is_test),
                     triggered_by,
                     trigger_source,
+                    int(time.time()),
                 ),
             )
             await db.commit()
@@ -295,6 +310,23 @@ class Storage:
                 )
             ).fetchall()
             return [dict(row) for row in rows]
+
+    async def get_job(self, job_id: int) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (await db.execute("select * from analysis_job where id=?", (job_id,))).fetchone()
+            return dict(row) if row else None
+
+    async def count_jobs(self, *, kind: str, since_ts: int, include_test: bool = False) -> int:
+        test_filter = "" if include_test else "and is_test = 0"
+        async with aiosqlite.connect(self.db_path) as db:
+            row = await (
+                await db.execute(
+                    f"select count(*) from analysis_job where kind=? and created_at >= ? {test_filter}",
+                    (kind, since_ts),
+                )
+            ).fetchone()
+            return int(row[0])
 
     async def create_feedback(
         self,
@@ -456,6 +488,28 @@ class Storage:
                 """,
                 (status, decided_by, int(time.time()), note, approval_id),
             )
+            await db.commit()
+
+    async def create_analysis_delivery(self, *, job_id: int, feedback_id: int, group_id: int | None, user_id: int | None) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                insert or replace into analysis_delivery(job_id, feedback_id, group_id, user_id, delivered_at)
+                values (?, ?, ?, ?, null)
+                """,
+                (job_id, feedback_id, group_id, user_id),
+            )
+            await db.commit()
+
+    async def get_analysis_delivery(self, job_id: int) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (await db.execute("select * from analysis_delivery where job_id=?", (job_id,))).fetchone()
+            return dict(row) if row else None
+
+    async def mark_analysis_delivered(self, job_id: int) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("update analysis_delivery set delivered_at=? where job_id=?", (int(time.time()), job_id))
             await db.commit()
 
     async def daily_counts(self, since_ts: int, include_test: bool = False) -> dict[str, int]:

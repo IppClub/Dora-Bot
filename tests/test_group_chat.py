@@ -20,9 +20,7 @@ group_chat:
   enabled_group_ids: [456]
   bot_aliases: [多萝, Dora]
   acknowledge_feedback: true
-  daily_group_analysis_limit: 1
-  daily_user_analysis_limit: 1
-  auto_create_analysis_jobs: false
+  auto_analysis_24h_limit: 0
 repositories:
   dora_ssr:
     name: Dora SSR
@@ -104,6 +102,81 @@ async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> No
     approval = await runtime.storage.get_pending_approval("feedback", result.feedback_id)
     assert approval is not None
     assert approval["command"] == f"/approve feedback {result.feedback_id}"
+
+
+@pytest.mark.asyncio
+async def test_group_feedback_auto_creates_analysis_job_within_daily_limit(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    async def fake_ensure_mirror(repo_key, repo):
+        return tmp_path
+
+    async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
+        assert repo_key == "dora_ssr"
+        assert repo_path == tmp_path
+        assert feedback_id == 1
+        assert triggered_by == "789"
+        assert trigger_source == "group_auto_analysis"
+        return await runtime.storage.create_job(
+            kind="feedback_analysis",
+            target_type="feedback",
+            target_id=feedback_id,
+            tmux_session="queued_feedback",
+            prompt_path=tmp_path / "prompt.md",
+            output_path=tmp_path / "output.json",
+            error_path=tmp_path / "error.log",
+            exit_code_path=tmp_path / "exit_code",
+            done_path=tmp_path / "done",
+            triggered_by=triggered_by,
+            trigger_source="group_auto_analysis",
+        )
+
+    runtime.group_chat.tracker.ensure_mirror = fake_ensure_mirror  # type: ignore[method-assign]
+    runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR 渲染管线怎么拆")
+    )
+
+    assert result is not None
+    assert result.reason == "auto_accepted"
+    assert result.analysis_job_id is not None
+    assert result.approval_id is None
+    assert "已自动放行" in (result.admin_notification or "")
+    assert await runtime.storage.get_pending_approval("feedback", result.feedback_id or 0) is None
+
+
+@pytest.mark.asyncio
+async def test_group_feedback_falls_back_to_approval_after_daily_auto_limit(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 1"), encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    job_file = tmp_path / "job_file"
+    job_file.write_text("", encoding="utf-8")
+    await runtime.storage.create_job(
+        kind="feedback_analysis",
+        target_type="feedback",
+        target_id=99,
+        tmux_session="already_used",
+        prompt_path=job_file,
+        output_path=job_file,
+        error_path=job_file,
+        exit_code_path=job_file,
+        done_path=job_file,
+    )
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR 渲染管线怎么拆")
+    )
+
+    assert result is not None
+    assert result.reason == "manual_required"
+    assert result.analysis_job_id is None
+    assert result.approval_id is not None
+    assert result.admin_notification is not None
+    assert "/approve feedback" in result.admin_notification
 
 
 @pytest.mark.asyncio

@@ -21,10 +21,8 @@ group_chat:
   debounce_seconds: 60
   # Minimum interval for proactive non-mention replies in the same group.
   chat_cooldown_seconds: 120
-  daily_group_analysis_limit: 3
-  daily_user_analysis_limit: 1
-  # Keep false until you are comfortable with the reply behavior.
-  auto_create_analysis_jobs: false
+  # First N repository-analysis requests in the previous 24 hours are accepted automatically.
+  auto_analysis_24h_limit: 10
 
 repositories:
   dora_ssr:

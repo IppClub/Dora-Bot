@@ -27,6 +27,8 @@ paths:
 admin:
   user_ids: [123]
   group_ids: []
+group_chat:
+  auto_analysis_24h_limit: 0
 repositories:
   dora_ssr:
     name: Dora SSR
@@ -355,6 +357,66 @@ async def test_progress_results_fallback_clips_raw_output(tmp_path: Path) -> Non
     assert "连续 3 天无提交" in result
     assert "```json" in result
     assert '"summary"' in result
+
+
+@pytest.mark.asyncio
+async def test_feedback_analysis_result_uses_llm_summary(tmp_path: Path) -> None:
+    output = tmp_path / "output.json"
+    output.write_text('{"summary":"需要补充最小复现","suggested_reply":"请补充平台和日志"}', encoding="utf-8")
+    fake = FakeChatClient("多萝整理版反馈分析")
+    plugin = object.__new__(DoraOpsPlugin)
+    plugin.runtime = SimpleNamespace(admin=SimpleNamespace(chat_client=fake), group_chat=SimpleNamespace(chat_client=None))
+
+    result = await plugin._format_feedback_analysis_result(
+        {
+            "id": 7,
+            "status": JobStatus.SUCCEEDED.value,
+            "output_path": str(output),
+        }
+    )
+
+    assert result == "多萝整理版反馈分析"
+    assert len(fake.calls) == 1
+    assert "反馈分析结果总结任务" in fake.calls[0][0]["content"]
+    assert "需要补充最小复现" in fake.calls[0][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_feedback_analysis_watcher_replies_to_group_requester(tmp_path: Path) -> None:
+    output = tmp_path / "output.json"
+    error = tmp_path / "error.log"
+    exit_code = tmp_path / "exit_code"
+    done = tmp_path / "done"
+    prompt = tmp_path / "prompt.md"
+    output.write_text('{"summary":"分析完成"}', encoding="utf-8")
+    error.write_text("", encoding="utf-8")
+    exit_code.write_text("0", encoding="utf-8")
+    done.touch()
+    prompt.write_text("prompt", encoding="utf-8")
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = runtime
+    job_id = await runtime.storage.create_job(
+        kind="feedback_analysis",
+        target_type="feedback",
+        target_id=1,
+        tmux_session="finished_feedback",
+        prompt_path=prompt,
+        output_path=output,
+        error_path=error,
+        exit_code_path=exit_code,
+        done_path=done,
+    )
+
+    await plugin._watch_feedback_analysis_job(job_id, 456, 789)
+
+    assert qq.group_messages == [(456, {"text": "分析完成：{\"summary\":\"分析完成\"}", "at": 789})]
+    delivery = await runtime.storage.get_analysis_delivery(job_id)
+    assert delivery is None
 
 
 @pytest.mark.asyncio

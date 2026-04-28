@@ -16,6 +16,7 @@ class JobManager:
         self.base_dir = base_dir
         self.config = config
         self.storage = storage
+        self._analysis_queue_lock = asyncio.Lock()
 
     async def create_tmux_echo_test(self, triggered_by: str | None = None) -> int:
         job_dir = self._next_job_dir("tmux_test")
@@ -91,6 +92,7 @@ class JobManager:
         prompt_text: str,
         *,
         triggered_by: str | None = None,
+        trigger_source: str = "admin_approval",
     ) -> int:
         job_dir = self._next_job_dir("feedback")
         prompt = job_dir / "prompt.md"
@@ -111,11 +113,11 @@ class JobManager:
             exit_code_path=exit_code,
             done_path=done,
             triggered_by=triggered_by,
-            trigger_source="admin_approval",
+            trigger_source=trigger_source,
         )
         opencode = self.config.jobs.opencode_command
         command = f"cd {shlex.quote(str(repo_path))} && {opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
-        await self._start_tmux_job(job_id, session, command, error, exit_code, done)
+        asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
         return job_id
 
     async def create_yesterday_progress_analysis(
@@ -203,9 +205,16 @@ class JobManager:
     def _next_job_dir(self, prefix: str) -> Path:
         root = resolve_path(self.base_dir, self.config.paths.job_dir)
         root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{prefix}_{int(time.time() * 1000)}"
-        path.mkdir(parents=True, exist_ok=False)
-        return path.resolve()
+        stamp = int(time.time() * 1000)
+        for index in range(100):
+            suffix = f"{stamp}" if index == 0 else f"{stamp}_{index}"
+            path = root / f"{prefix}_{suffix}"
+            try:
+                path.mkdir(parents=True, exist_ok=False)
+                return path.resolve()
+            except FileExistsError:
+                continue
+        raise RuntimeError(f"failed to allocate job directory for {prefix}")
 
     async def _start_tmux_job(
         self,
@@ -237,6 +246,26 @@ class JobManager:
             await self.storage.update_job_status(job_id, JobStatus.FAILED, error)
             raise RuntimeError(error)
         await self.storage.update_job_status(job_id, JobStatus.RUNNING)
+
+    async def _run_serial_analysis_job(
+        self,
+        job_id: int,
+        session: str,
+        command: str,
+        error_path: Path,
+        exit_code_path: Path,
+        done_path: Path,
+    ) -> None:
+        async with self._analysis_queue_lock:
+            try:
+                await self._start_tmux_job(job_id, session, command, error_path, exit_code_path, done_path)
+                while not done_path.exists():
+                    await asyncio.sleep(5)
+                job = await self.storage.get_job(job_id)
+                if job is not None:
+                    await self.reconcile_job(job)
+            except Exception as exc:
+                await self.storage.update_job_status(job_id, JobStatus.FAILED, str(exc))
 
     @staticmethod
     async def _tmux_session_exists(session: str) -> bool:
