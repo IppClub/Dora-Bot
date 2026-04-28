@@ -63,12 +63,14 @@ group_chat:
     - 多萝
     - Dora
   acknowledge_feedback: true
+  chat_enabled: true
+  chat_cooldown_seconds: 20
   daily_group_analysis_limit: 3
   daily_user_analysis_limit: 1
   auto_create_analysis_jobs: false
 ```
 
-With `enabled_group_ids: []`, every group is allowed. For production, fill explicit group ids. The current group-chat path is conservative: Dora SSR/YueScript-related feedback is recorded and acknowledged, unrelated messages are ignored, and deep repository analysis waits for admin confirmation unless later enabled explicitly.
+With `enabled_group_ids: []`, every group is allowed. For production, fill explicit group ids. The current group-chat path is conservative: Dora SSR/YueScript-related feedback is recorded and acknowledged, unrelated messages are ignored, and deep repository analysis waits for admin confirmation unless later enabled explicitly. When `llm.enabled` and `group_chat.chat_enabled` are true, group chat history is stored and the chat model may reply as Dora after being mentioned or after the cooldown window.
 
 Useful commands:
 
@@ -95,7 +97,7 @@ The first implemented NcatBot surface is the admin test console. These commands 
 - `/approve feedback <id>`
 - `/reject feedback <id>`
 
-Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related feedback is recorded, and messages that need repository analysis create a pending approval that can be approved with `/approve feedback <id>`. Private-chat history is stored and, when `llm.enabled: true`, the chat model receives the most recent `llm.max_context_messages` messages.
+Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related feedback is recorded, and messages that need repository analysis create a pending approval that can be approved with `/approve feedback <id>`. Private-chat and enabled group-chat history is stored and, when `llm.enabled: true`, the chat model receives the most recent `llm.max_context_messages` messages.
 
 `/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path from private chat. Pass the target group id explicitly.
 

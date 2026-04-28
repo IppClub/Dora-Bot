@@ -20,8 +20,8 @@ class DoraOpsRuntime:
         self.tracker = RepoTracker(base_dir, config, storage)
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
-        self.group_chat = GroupMessageService(config, storage)
         chat_client = OpenAICompatibleChatClient(config.llm.chat) if config.llm.enabled else None
+        self.group_chat = GroupMessageService(config, storage, chat_client)
         self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries, self.group_chat, chat_client)
 
     @classmethod

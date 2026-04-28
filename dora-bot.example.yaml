@@ -17,6 +17,8 @@ group_chat:
     - Dora
     - Dora Bot
   acknowledge_feedback: true
+  chat_enabled: true
+  chat_cooldown_seconds: 20
   daily_group_analysis_limit: 3
   daily_user_analysis_limit: 1
   # Keep false until you are comfortable with the reply behavior.

@@ -39,6 +39,31 @@ repositories:
 """
 
 
+LLM_CONFIG = CONFIG + """
+llm:
+  enabled: true
+  max_context_messages: 3
+  chat:
+    provider: openai-compatible
+    base_url: https://example.invalid
+    api_key_env: TEST_API_KEY
+    model: test-model
+    temperature: 0.1
+    max_tokens: 128
+    timeout_seconds: 5
+"""
+
+
+class FakeChatClient:
+    def __init__(self, replies: list[str]):
+        self.replies = replies
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def complete(self, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        return self.replies.pop(0) if self.replies else ""
+
+
 @pytest.mark.asyncio
 async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -111,3 +136,59 @@ async def test_group_ignores_test_commands(tmp_path: Path) -> None:
         GroupMessageInput(group_id=456, user_id=123, nickname="admin", text="/test ping")
     )
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    fake = FakeChatClient(["只是刚好知道而已，别误会。"])
+    runtime.group_chat.chat_client = fake
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="多萝，今天聊点啥")
+    )
+
+    assert result is not None
+    assert result.reason == "llm_chat"
+    assert result.reply == "只是刚好知道而已，别误会。"
+    assert fake.calls
+    recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
+    assert [row["role"] for row in recent] == ["user", "assistant"]
+    assert "tester：" in recent[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_group_chat_llm_empty_response_stays_silent(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    fake = FakeChatClient([""])
+    runtime.group_chat.chat_client = fake
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="今天吃什么")
+    )
+
+    assert result is None
+    assert fake.calls
+
+
+@pytest.mark.asyncio
+async def test_group_feedback_ack_takes_priority_over_llm_chat(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    fake = FakeChatClient(["不应该使用这条回复"])
+    runtime.group_chat.chat_client = fake
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR Web IDE 创建文件后无法刷新")
+    )
+
+    assert result is not None
+    assert result.reason == "manual_required"
+    assert result.reply is not None
+    assert "已记录" in result.reply
+    assert fake.calls == []
