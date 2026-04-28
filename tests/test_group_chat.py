@@ -160,6 +160,9 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert "# 多萝能做什么" in system_prompt
     assert "/test daily-summary --progress" in system_prompt
     assert "不能假装已经执行命令" in system_prompt
+    assert "# 能力触发规则" in system_prompt
+    assert "报错、崩溃、无法、不能、失败" in system_prompt
+    assert "追问报错全文、平台、版本、复现步骤" in system_prompt
     assert "消息中明确 @多萝 或提及 Dora SSR 就一定要回复" in system_prompt
     assert "不需要回复时返回空字符串" in system_prompt
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
