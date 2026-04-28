@@ -122,8 +122,15 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
 def test_plugin_message_segments_support_ncatbot_objects() -> None:
     msg = SimpleNamespace(message=[FakePlainText("准备 "), FakePlainText("尝试一种模式"), FakeAt()])
 
+    assert DoraOpsPlugin._message_text(msg) == "准备 尝试一种模式"
     assert DoraOpsPlugin._extract_text(msg) == "准备 尝试一种模式"
     assert DoraOpsPlugin._mentions_bot(msg) is True
+
+
+def test_plugin_message_text_prefers_raw_message() -> None:
+    msg = SimpleNamespace(raw_message="/test help", text="", message=[FakePlainText("ignored")])
+
+    assert DoraOpsPlugin._message_text(msg) == "/test help"
 
 
 @pytest.mark.asyncio

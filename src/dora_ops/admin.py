@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from .classifier import classify_text, classify_text_with_llm
@@ -21,6 +22,7 @@ REPO_ALIASES = {
     "yuescript": "yuescript",
     "yue": "yuescript",
 }
+logger = logging.getLogger(__name__)
 
 
 class AdminCommands:
@@ -53,12 +55,15 @@ class AdminCommands:
 
     async def handle(self, text: str, *, user_id: int, group_id: int | None = None) -> str | None:
         if group_id is not None:
+            logger.info("admin command skipped: group context user=%s group=%s", user_id, group_id)
             return None
         if not (text.startswith("/test") or text.startswith("/approve") or text.startswith("/reject") or text.startswith("/approvals")):
             if not self.is_admin(user_id):
+                logger.info("admin private chat skipped: non-admin user=%s", user_id)
                 return None
             return await self._handle_private_chat(text, user_id=user_id)
         if not self.is_admin(user_id):
+            logger.info("admin command denied: user=%s text=%r", user_id, self._clip_log(text))
             return "没有管理员权限。"
 
         if text.startswith("/approve"):
@@ -80,6 +85,7 @@ class AdminCommands:
         command = parts[1]
         arg = parts[2] if len(parts) > 2 else ""
         triggered_by = str(user_id)
+        logger.info("admin command accepted: user=%s command=%s arg=%r", user_id, command, self._clip_log(arg))
 
         if command == "ping":
             await self.storage.daily_counts(0, include_test=True)
@@ -202,10 +208,20 @@ class AdminCommands:
     async def _handle_private_chat(self, text: str, *, user_id: int) -> str | None:
         normalized = text.strip()
         if not normalized:
+            logger.info("admin private chat skipped: empty text user=%s", user_id)
             return None
         conversation_key = self._private_conversation_key(user_id)
         await self.storage.append_chat_message(conversation_key, "user", normalized)
         classification = await self._classify_private_text(normalized)
+        logger.info(
+            "admin private chat classified: user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f",
+            user_id,
+            classification.kind,
+            classification.project,
+            classification.should_accept,
+            classification.needs_repo_analysis,
+            classification.confidence,
+        )
         side_effect_note = await self._record_private_chat_feedback(
             normalized,
             user_id=user_id,
@@ -218,12 +234,15 @@ class AdminCommands:
                     side_effect_note=side_effect_note,
                 )
             except LLMError as exc:
+                logger.info("admin private chat llm failed: user=%s error=%s", user_id, exc)
                 reply = f"LLM 回复失败：{exc}\n{self._fallback_private_chat_reply(classification, side_effect_note)}"
             await self.storage.append_chat_message(conversation_key, "assistant", reply)
+            logger.info("admin private chat replied via llm: user=%s reply_len=%s", user_id, len(reply))
             return reply
 
         reply = self._fallback_private_chat_reply(classification, side_effect_note)
         await self.storage.append_chat_message(conversation_key, "assistant", reply)
+        logger.info("admin private chat replied via fallback: user=%s reply_len=%s", user_id, len(reply))
         return reply
 
     async def _record_private_chat_feedback(self, text: str, *, user_id: int, classification) -> str | None:
@@ -240,6 +259,7 @@ class AdminCommands:
             normalized_summary=classification.summary,
         )
         if not classification.needs_repo_analysis:
+            logger.info("admin private feedback recorded: user=%s feedback=%s repo_analysis=false", user_id, feedback_id)
             return f"已记录为 #{feedback_id}。"
 
         existing = await self.storage.get_pending_approval("feedback", feedback_id)
@@ -250,7 +270,13 @@ class AdminCommands:
             requested_group_id=None,
             command=f"/approve feedback {feedback_id}",
         )
+        logger.info("admin private feedback recorded: user=%s feedback=%s approval=%s repo_analysis=true", user_id, feedback_id, approval_id)
         return f"已记录为 #{feedback_id}，可发送 /approve feedback {feedback_id} 批准深度分析。审批 #{approval_id}。"
+
+    @staticmethod
+    def _clip_log(text: str, limit: int = 160) -> str:
+        compact = " ".join(str(text).split())
+        return compact if len(compact) <= limit else f"{compact[:limit].rstrip()}..."
 
     async def _classify_private_text(self, text: str):
         client = self.classifier_client if self.config.llm.enabled else None
