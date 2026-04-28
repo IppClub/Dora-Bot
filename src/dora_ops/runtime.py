@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .admin import AdminCommands
 from .config import BotConfig, load_config, resolve_path
+from .group_chat import GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
 from .repo_tracker import RepoTracker
 from .storage import Storage
@@ -19,6 +20,7 @@ class DoraOpsRuntime:
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
         self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries)
+        self.group_chat = GroupMessageService(config, storage)
 
     @classmethod
     async def create(cls, config_path: str | Path = "config.yaml") -> "DoraOpsRuntime":
@@ -32,3 +34,6 @@ class DoraOpsRuntime:
 
     async def handle_admin_text(self, text: str, *, user_id: int, group_id: int | None = None) -> str | None:
         return await self.admin.handle(text, user_id=user_id, group_id=group_id)
+
+    async def handle_group_message(self, msg: GroupMessageInput) -> GroupMessageResult | None:
+        return await self.group_chat.handle(msg)

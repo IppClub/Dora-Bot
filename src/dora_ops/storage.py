@@ -72,6 +72,30 @@ create table if not exists feedback(
   created_at integer not null
 );
 
+create table if not exists quota_event(
+  id integer primary key autoincrement,
+  quota_key text not null,
+  group_id integer,
+  user_id integer,
+  event_type text not null,
+  is_test integer not null default 0,
+  created_at integer not null
+);
+
+create table if not exists approval_request(
+  id integer primary key autoincrement,
+  target_type text not null,
+  target_id integer not null,
+  status text not null,
+  requested_by integer,
+  requested_group_id integer,
+  command text not null,
+  created_at integer not null,
+  decided_by integer,
+  decided_at integer,
+  decision_note text
+);
+
 create table if not exists scheduler_state(
   job_name text primary key,
   last_run_date text,
@@ -293,6 +317,104 @@ class Storage:
             )
             await db.commit()
             return int(cursor.lastrowid)
+
+    async def get_feedback(self, feedback_id: int) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (await db.execute("select * from feedback where id=?", (feedback_id,))).fetchone()
+            return dict(row) if row else None
+
+    async def count_quota_events(self, quota_key: str, since_ts: int, *, include_test: bool = False) -> int:
+        test_filter = "" if include_test else "and is_test = 0"
+        async with aiosqlite.connect(self.db_path) as db:
+            row = await (
+                await db.execute(
+                    f"select count(*) from quota_event where quota_key=? and created_at >= ? {test_filter}",
+                    (quota_key, since_ts),
+                )
+            ).fetchone()
+            return int(row[0])
+
+    async def record_quota_event(
+        self,
+        quota_key: str,
+        *,
+        group_id: int | None,
+        user_id: int | None,
+        event_type: str,
+        is_test: bool = False,
+    ) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                insert into quota_event(quota_key, group_id, user_id, event_type, is_test, created_at)
+                values (?, ?, ?, ?, ?, ?)
+                """,
+                (quota_key, group_id, user_id, event_type, int(is_test), int(time.time())),
+            )
+            await db.commit()
+            return int(cursor.lastrowid)
+
+    async def create_approval_request(
+        self,
+        *,
+        target_type: str,
+        target_id: int,
+        requested_by: int | None,
+        requested_group_id: int | None,
+        command: str,
+    ) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                insert into approval_request(target_type, target_id, status, requested_by, requested_group_id, command, created_at)
+                values (?, ?, 'pending', ?, ?, ?, ?)
+                """,
+                (target_type, target_id, requested_by, requested_group_id, command, int(time.time())),
+            )
+            await db.commit()
+            return int(cursor.lastrowid)
+
+    async def get_pending_approval(self, target_type: str, target_id: int) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (
+                await db.execute(
+                    """
+                    select * from approval_request
+                    where target_type=? and target_id=? and status='pending'
+                    order by id desc limit 1
+                    """,
+                    (target_type, target_id),
+                )
+            ).fetchone()
+            return dict(row) if row else None
+
+    async def list_pending_approvals(self, limit: int = 10) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (
+                await db.execute(
+                    "select * from approval_request where status='pending' order by id desc limit ?",
+                    (limit,),
+                )
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def decide_approval(self, approval_id: int, status: str, *, decided_by: int, note: str | None = None) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                update approval_request set
+                  status=?,
+                  decided_by=?,
+                  decided_at=?,
+                  decision_note=?
+                where id=? and status='pending'
+                """,
+                (status, decided_by, int(time.time()), note, approval_id),
+            )
+            await db.commit()
 
     async def daily_counts(self, since_ts: int, include_test: bool = False) -> dict[str, int]:
         test_filter = "" if include_test else "and is_test = 0"

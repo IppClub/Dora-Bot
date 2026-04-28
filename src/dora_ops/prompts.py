@@ -40,3 +40,39 @@ Return JSON only, with this shape:
   "confidence": "low|medium|high"
 }}
 """
+
+
+def feedback_analysis_prompt(
+    *,
+    repo_name: str,
+    project: str | None,
+    kind: str | None,
+    title: str | None,
+    original_text: str,
+) -> str:
+    return f"""You are analyzing a community feedback item for {repo_name}.
+
+Run in read-only mode. Do not edit files. Do not run destructive commands.
+
+Feedback metadata:
+- project: {project or repo_name}
+- kind: {kind or "unknown"}
+- title: {title or ""}
+
+Original user message:
+```text
+{original_text[:12000]}
+```
+
+Inspect the repository only as needed and return JSON only:
+{{
+  "summary": "short technical summary",
+  "is_valid_project_issue": true,
+  "likely_area": ["..."],
+  "need_more_info": false,
+  "questions_for_user": ["..."],
+  "maintainer_notes": ["..."],
+  "suggested_reply": "short QQ reply in Chinese",
+  "confidence": "low|medium|high"
+}}
+"""

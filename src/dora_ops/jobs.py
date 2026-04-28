@@ -83,6 +83,41 @@ class JobManager:
             await self.storage.update_repo_change_status(change_id, ChangeStatus.ANALYZING)
         return job_id
 
+    async def create_feedback_analysis(
+        self,
+        repo_key: str,
+        repo_path: Path,
+        feedback_id: int,
+        prompt_text: str,
+        *,
+        triggered_by: str | None = None,
+    ) -> int:
+        job_dir = self._next_job_dir("feedback")
+        prompt = job_dir / "prompt.md"
+        output = job_dir / "output.json"
+        error = job_dir / "error.log"
+        exit_code = job_dir / "exit_code"
+        done = job_dir / "done"
+        prompt.write_text(prompt_text, encoding="utf-8")
+        session = f"dora_job_{int(time.time())}_{repo_key}_feedback_{feedback_id}"
+        job_id = await self.storage.create_job(
+            kind="feedback_analysis",
+            target_type="feedback",
+            target_id=feedback_id,
+            tmux_session=session,
+            prompt_path=prompt,
+            output_path=output,
+            error_path=error,
+            exit_code_path=exit_code,
+            done_path=done,
+            triggered_by=triggered_by,
+            trigger_source="admin_approval",
+        )
+        opencode = self.config.jobs.opencode_command
+        command = f"cd {shlex.quote(str(repo_path))} && {opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        await self._start_tmux_job(job_id, session, command, error, exit_code, done)
+        return job_id
+
     async def reconcile_job(self, job: dict[str, object]) -> JobStatus | None:
         job_id = int(job["id"])
         done_path = Path(str(job["done_path"]))

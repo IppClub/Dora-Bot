@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 from .classifier import classify_text
-from .config import BotConfig, resolve_path
+from .config import BotConfig
 from .jobs import JobManager
-from .prompts import repo_diff_prompt
+from .prompts import feedback_analysis_prompt, repo_diff_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
@@ -44,10 +44,25 @@ class AdminCommands:
         return group_id is not None and group_id in self.config.admin.group_ids
 
     async def handle(self, text: str, *, user_id: int, group_id: int | None = None) -> str | None:
-        if not text.startswith("/test"):
+        if group_id is not None:
             return None
-        if not self.is_admin(user_id, group_id):
+        if not (text.startswith("/test") or text.startswith("/approve") or text.startswith("/reject") or text.startswith("/approvals")):
+            return None
+        if not self.is_admin(user_id):
             return "没有管理员权限。"
+
+        if text.startswith("/approve"):
+            try:
+                return await self._handle_approve(text, user_id=user_id)
+            except ValueError as exc:
+                return str(exc)
+        if text.startswith("/reject"):
+            try:
+                return await self._handle_reject(text, user_id=user_id)
+            except ValueError as exc:
+                return str(exc)
+        if text.startswith("/approvals"):
+            return await self._handle_approvals()
 
         parts = text.split(maxsplit=2)
         if len(parts) == 1:
@@ -141,8 +156,77 @@ class AdminCommands:
                 "/test opencode Dora-SSR|YueScript",
                 "/test daily-summary --dry-run",
                 "/test job-status --include-test",
+                "/approvals",
+                "/approve feedback <id>",
+                "/reject feedback <id>",
             ]
         )
+
+    async def _handle_approvals(self) -> str:
+        approvals = await self.storage.list_pending_approvals()
+        if not approvals:
+            return "没有待审批任务。"
+        lines = ["待审批任务："]
+        for approval in approvals:
+            lines.append(
+                f"#{approval['id']} {approval['target_type']}:{approval['target_id']} "
+                f"群={approval['requested_group_id'] or '-'} 命令：{approval['command']}"
+            )
+        return "\n".join(lines)
+
+    async def _handle_reject(self, text: str, *, user_id: int) -> str:
+        target_type, target_id = self._parse_decision_command(text, "/reject")
+        approval = await self.storage.get_pending_approval(target_type, target_id)
+        if approval is None:
+            return f"没有待拒绝任务：{target_type} {target_id}"
+        await self.storage.decide_approval(int(approval["id"]), "rejected", decided_by=user_id)
+        return f"已拒绝：{target_type} {target_id}"
+
+    async def _handle_approve(self, text: str, *, user_id: int) -> str:
+        target_type, target_id = self._parse_decision_command(text, "/approve")
+        approval = await self.storage.get_pending_approval(target_type, target_id)
+        if approval is None:
+            return f"没有待批准任务：{target_type} {target_id}"
+        if target_type != "feedback":
+            return f"暂不支持批准类型：{target_type}"
+
+        feedback = await self.storage.get_feedback(target_id)
+        if feedback is None:
+            return f"反馈不存在：#{target_id}"
+
+        repo_key = self._repo_key_for_project(feedback.get("project"))
+        repo = self.config.repositories[repo_key]
+        mirror = await self.tracker.ensure_mirror(repo_key, repo)
+        prompt = feedback_analysis_prompt(
+            repo_name=repo.name,
+            project=feedback.get("project"),
+            kind=feedback.get("kind"),
+            title=feedback.get("title"),
+            original_text=str(feedback.get("original_text") or ""),
+        )
+        job_id = await self.jobs.create_feedback_analysis(
+            repo_key,
+            mirror,
+            target_id,
+            prompt,
+            triggered_by=str(user_id),
+        )
+        await self.storage.decide_approval(int(approval["id"]), "approved", decided_by=user_id, note=f"job:{job_id}")
+        return f"已批准反馈 #{target_id}，分析任务已创建：#{job_id}"
+
+    @staticmethod
+    def _parse_decision_command(text: str, prefix: str) -> tuple[str, int]:
+        parts = text.split()
+        if len(parts) != 3 or parts[0] != prefix:
+            raise ValueError(f"格式错误：{prefix} feedback <id>")
+        return parts[1], int(parts[2])
+
+    @staticmethod
+    def _repo_key_for_project(project: object) -> str:
+        text = str(project or "").lower()
+        if "yue" in text:
+            return "yuescript"
+        return "dora_ssr"
 
     @staticmethod
     def _repo_key(value: str) -> str:

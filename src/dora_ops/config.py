@@ -19,6 +19,16 @@ class AdminConfig(BaseModel):
     group_ids: set[int] = Field(default_factory=set)
 
 
+class GroupChatConfig(BaseModel):
+    enabled: bool = True
+    enabled_group_ids: set[int] = Field(default_factory=set)
+    bot_aliases: list[str] = Field(default_factory=lambda: ["多萝", "Dora", "Dora Bot"])
+    acknowledge_feedback: bool = True
+    daily_group_analysis_limit: int = 3
+    daily_user_analysis_limit: int = 1
+    auto_create_analysis_jobs: bool = False
+
+
 class RepositoryConfig(BaseModel):
     name: str
     remote: str
@@ -32,6 +42,22 @@ class JobsConfig(BaseModel):
     opencode_command: str = "opencode run"
 
 
+class LLMProfileConfig(BaseModel):
+    provider: str = "openai-compatible"
+    base_url: str = "https://api.deepseek.com"
+    api_key_env: str = "DEEPSEEK_API_KEY"
+    model: str = "deepseek-chat"
+    temperature: float = 0.2
+    max_tokens: int = 1024
+    timeout_seconds: int = 60
+
+
+class LLMConfig(BaseModel):
+    enabled: bool = False
+    classifier: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
+    summarizer: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
+
+
 class SchedulerConfig(BaseModel):
     daily_summary_time: str = "23:00"
     timezone: str = "Asia/Shanghai"
@@ -40,8 +66,10 @@ class SchedulerConfig(BaseModel):
 class BotConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
+    group_chat: GroupChatConfig = Field(default_factory=GroupChatConfig)
     repositories: dict[str, RepositoryConfig]
     jobs: JobsConfig = Field(default_factory=JobsConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
 
     def ensure_dirs(self, base_dir: Path) -> None:

@@ -17,6 +17,53 @@ The runtime is split into a testable core package and a thin NcatBot plugin adap
 
 Copy `config.example.yaml` to `config.yaml` and fill in admin QQ ids before running the bot.
 
+Model configuration:
+
+```yaml
+llm:
+  enabled: false
+  classifier:
+    provider: openai-compatible
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+  summarizer:
+    provider: openai-compatible
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+```
+
+Keep API keys in environment variables, not in `config.yaml`:
+
+```bash
+export DEEPSEEK_API_KEY='...'
+```
+
+`jobs.opencode_command` is separate from `llm`; it controls the tmux worker command used for repository analysis:
+
+```yaml
+jobs:
+  opencode_command: opencode run
+```
+
+Group chat behavior:
+
+```yaml
+group_chat:
+  enabled: true
+  enabled_group_ids: []
+  bot_aliases:
+    - 多萝
+    - Dora
+  acknowledge_feedback: true
+  daily_group_analysis_limit: 3
+  daily_user_analysis_limit: 1
+  auto_create_analysis_jobs: false
+```
+
+With `enabled_group_ids: []`, every group is allowed. For production, fill explicit group ids. The current group-chat path is conservative: Dora SSR/YueScript-related feedback is recorded and acknowledged, unrelated messages are ignored, and deep repository analysis waits for admin confirmation unless later enabled explicitly.
+
 Useful commands:
 
 ```bash
@@ -26,7 +73,7 @@ uv run dora-bot --config config.yaml admin '/test repo-check Dora-SSR' --user-id
 uv run dora-bot --config config.yaml admin '/test daily-summary --dry-run' --user-id 123456
 ```
 
-The first implemented NcatBot surface is the admin test console:
+The first implemented NcatBot surface is the admin test console. These commands only run in private chat with an admin account:
 
 - `/test ping`
 - `/test classify <文本>`
@@ -36,8 +83,22 @@ The first implemented NcatBot surface is the admin test console:
 - `/test opencode Dora-SSR|YueScript`
 - `/test daily-summary --dry-run`
 - `/test job-status --include-test`
+- `/approvals`
+- `/approve feedback <id>`
+- `/reject feedback <id>`
 
 `/test tmux` and `/test opencode ...` create asynchronous jobs under `jobs/`. Job output is reconciled by the core `JobManager`; the bot stores the tracked repository change first and fills in analysis results later.
+
+When group chat records a feedback item that needs deeper repository analysis, it creates a pending approval. Admins approve or reject it in private chat:
+
+```text
+/approvals
+/approve feedback 12
+/reject feedback 12
+```
+
+Approving a feedback item creates a tmux/opencode job against the corresponding repository mirror.
+The group acknowledgement mentions the first configured admin QQ via NcatBot's `post_group_msg(..., at=<qq>)` helper.
 
 NcatBot startup:
 

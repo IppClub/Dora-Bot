@@ -10,6 +10,7 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
     registrar = None  # type: ignore[assignment]
 
 from dora_ops.runtime import DoraOpsRuntime
+from dora_ops.group_chat import GroupMessageInput
 
 
 class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
@@ -34,9 +35,17 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             text = getattr(event, "raw_message", "") or self._extract_text(event)
             user_id = int(getattr(getattr(event, "sender", None), "user_id", 0) or getattr(event, "user_id", 0))
             group_id = int(getattr(event, "group_id", 0))
-            result = await self.runtime.handle_admin_text(text, user_id=user_id, group_id=group_id)
-            if result:
-                await event.reply(text=result)
+            group_result = await self.runtime.handle_group_message(
+                GroupMessageInput(
+                    group_id=group_id,
+                    user_id=user_id,
+                    nickname=str(getattr(getattr(event, "sender", None), "nickname", "")),
+                    text=text,
+                    mentions_bot=self._mentions_bot(event),
+                )
+            )
+            if group_result and group_result.reply:
+                await self._send_group_reply(group_id, group_result.reply, group_result.mention_admin_id)
 
     else:
 
@@ -51,9 +60,17 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             text = getattr(msg, "raw_message", "") or self._extract_text(msg)
             user_id = int(getattr(getattr(msg, "sender", None), "user_id", 0) or getattr(msg, "user_id", 0))
             group_id = int(getattr(msg, "group_id", 0))
-            result = await self.runtime.handle_admin_text(text, user_id=user_id, group_id=group_id)
-            if result:
-                await self.api.post_group_msg(group_id, text=result)
+            group_result = await self.runtime.handle_group_message(
+                GroupMessageInput(
+                    group_id=group_id,
+                    user_id=user_id,
+                    nickname=str(getattr(getattr(msg, "sender", None), "nickname", "")),
+                    text=text,
+                    mentions_bot=self._mentions_bot(msg),
+                )
+            )
+            if group_result and group_result.reply:
+                await self._send_group_reply(group_id, group_result.reply, group_result.mention_admin_id)
 
     @staticmethod
     def _extract_text(msg) -> str:
@@ -62,3 +79,16 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             if item.get("type") == "text":
                 chunks.append(item.get("data", {}).get("text", ""))
         return "".join(chunks)
+
+    @staticmethod
+    def _mentions_bot(msg) -> bool:
+        for item in getattr(msg, "message", []) or []:
+            if item.get("type") == "at":
+                return True
+        return False
+
+    async def _send_group_reply(self, group_id: int, text: str, at_user_id: int | None = None) -> None:
+        if at_user_id is not None:
+            await self.api.post_group_msg(group_id, text=text, at=at_user_id)
+            return
+        await self.api.post_group_msg(group_id, text=text)

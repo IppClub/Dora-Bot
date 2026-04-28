@@ -8,6 +8,20 @@ admin:
   user_ids: []
   group_ids: []
 
+group_chat:
+  enabled: true
+  # Empty means all groups are allowed. Fill this for production.
+  enabled_group_ids: []
+  bot_aliases:
+    - 多萝
+    - Dora
+    - Dora Bot
+  acknowledge_feedback: true
+  daily_group_analysis_limit: 3
+  daily_user_analysis_limit: 1
+  # Keep false until you are comfortable with the reply behavior.
+  auto_create_analysis_jobs: false
+
 repositories:
   dora_ssr:
     name: Dora SSR
@@ -34,6 +48,25 @@ repositories:
 jobs:
   max_runtime_seconds: 600
   opencode_command: opencode run
+
+llm:
+  enabled: false
+  classifier:
+    provider: openai-compatible
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+    temperature: 0.1
+    max_tokens: 512
+    timeout_seconds: 30
+  summarizer:
+    provider: openai-compatible
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-chat
+    temperature: 0.2
+    max_tokens: 2048
+    timeout_seconds: 60
 
 scheduler:
   daily_summary_time: "23:00"
