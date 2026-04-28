@@ -12,7 +12,13 @@ from .llm import LLMError, OpenAICompatibleChatClient
 from .storage import Storage
 
 
-logger = logging.getLogger(__name__)
+try:
+    from ncatbot.utils import get_log
+except Exception:  # pragma: no cover - lets core tests run without NcatBot internals.
+    get_log = None  # type: ignore[assignment]
+
+
+logger = get_log("DoraOps.GroupChat") if get_log is not None else logging.getLogger(__name__)
 
 
 DORA_PERSONA_PROMPT = """# 角色设定

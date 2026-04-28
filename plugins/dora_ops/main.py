@@ -10,9 +10,11 @@ from typing import Awaitable, Callable
 try:
     from ncatbot.plugin import NcatBotPlugin
     from ncatbot.core import registrar
+    from ncatbot.utils import get_log
 except Exception:  # pragma: no cover - lets core tests run without NcatBot internals.
     NcatBotPlugin = object  # type: ignore[misc,assignment]
     registrar = None  # type: ignore[assignment]
+    get_log = None  # type: ignore[assignment]
 
 from dora_ops.runtime import DoraOpsRuntime
 from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupMessageInput
@@ -22,7 +24,7 @@ from dora_ops.models import JobStatus
 
 PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
 PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
-logger = logging.getLogger(__name__)
+logger = get_log("DoraOps") if get_log is not None else logging.getLogger(__name__)
 
 
 class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
@@ -158,15 +160,25 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     @staticmethod
     def _extract_text(msg) -> str:
+        message = getattr(msg, "message", []) or []
+        text = getattr(message, "text", None)
+        if isinstance(text, str):
+            return text
         chunks: list[str] = []
-        for item in getattr(msg, "message", []) or []:
+        for item in message:
             if DoraOpsPlugin._segment_type(item) == "text":
                 chunks.append(DoraOpsPlugin._segment_text(item))
         return "".join(chunks)
 
     @staticmethod
     def _mentions_bot(msg) -> bool:
-        for item in getattr(msg, "message", []) or []:
+        message = getattr(msg, "message", []) or []
+        try:
+            if message.filter_at():
+                return True
+        except AttributeError:
+            pass
+        for item in message:
             if DoraOpsPlugin._segment_type(item) == "at":
                 return True
         return False
@@ -175,6 +187,11 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     def _segment_type(item) -> str:
         if isinstance(item, dict):
             return str(item.get("type") or "")
+        to_dict = getattr(item, "to_dict", None)
+        if callable(to_dict):
+            data = to_dict()
+            if isinstance(data, dict):
+                return str(data.get("type") or "")
         value = getattr(item, "type", None) or getattr(item, "message_type", None)
         if value is not None:
             return str(value)
@@ -192,6 +209,13 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             if isinstance(data, dict):
                 return str(data.get("text") or "")
             return ""
+        to_dict = getattr(item, "to_dict", None)
+        if callable(to_dict):
+            data = to_dict()
+            if isinstance(data, dict):
+                segment_data = data.get("data", {})
+                if isinstance(segment_data, dict):
+                    return str(segment_data.get("text") or "")
         for attr in ("text", "content", "data"):
             value = getattr(item, attr, None)
             if isinstance(value, str):

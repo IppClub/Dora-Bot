@@ -15,6 +15,12 @@ from .storage import Storage
 from .summary import SummaryService
 
 
+try:
+    from ncatbot.utils import get_log
+except Exception:  # pragma: no cover - lets core tests run without NcatBot internals.
+    get_log = None  # type: ignore[assignment]
+
+
 REPO_ALIASES = {
     "dora-ssr": "dora_ssr",
     "dora_ssr": "dora_ssr",
@@ -22,7 +28,7 @@ REPO_ALIASES = {
     "yuescript": "yuescript",
     "yue": "yuescript",
 }
-logger = logging.getLogger(__name__)
+logger = get_log("DoraOps.Admin") if get_log is not None else logging.getLogger(__name__)
 
 
 class AdminCommands:
