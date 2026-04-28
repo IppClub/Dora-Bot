@@ -1,5 +1,6 @@
-[plugin]
 name = "dora_ops"
 version = "0.1.0"
+main = "main"
+entry_class = "DoraOpsPlugin"
 description = "Dora SSR/YueScript maintainer assistant"
 author = "Dora"
