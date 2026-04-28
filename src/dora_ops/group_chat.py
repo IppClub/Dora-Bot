@@ -5,7 +5,7 @@ from datetime import datetime, time as dt_time
 import time
 from zoneinfo import ZoneInfo
 
-from .classifier import Classification, classify_text
+from .classifier import Classification, classify_text_with_llm
 from .config import BotConfig
 from .llm import LLMError, OpenAICompatibleChatClient
 from .storage import Storage
@@ -77,10 +77,17 @@ class GroupMessageResult:
 
 
 class GroupMessageService:
-    def __init__(self, config: BotConfig, storage: Storage, chat_client: OpenAICompatibleChatClient | None = None):
+    def __init__(
+        self,
+        config: BotConfig,
+        storage: Storage,
+        chat_client: OpenAICompatibleChatClient | None = None,
+        classifier_client: OpenAICompatibleChatClient | None = None,
+    ):
         self.config = config
         self.storage = storage
         self.chat_client = chat_client
+        self.classifier_client = classifier_client
         self._last_chat_reply_at: dict[int, float] = {}
 
     async def handle(self, msg: GroupMessageInput) -> GroupMessageResult | None:
@@ -103,9 +110,10 @@ class GroupMessageService:
             "user",
             self._format_group_user_message(msg.nickname, text, mentions_bot=mentions_bot),
         )
-        classification = classify_text(text)
+        classification = await self._classify(text)
         can_chat = self._can_chat(msg.group_id, mentions_bot=mentions_bot)
-        if not classification.should_accept and not mentions_bot and not can_chat:
+        should_explain = classification.kind == "project_question"
+        if not classification.should_accept and not mentions_bot and not can_chat and not should_explain:
             return None
 
         feedback_id: int | None = None
@@ -153,7 +161,7 @@ class GroupMessageService:
             reply = await self._llm_group_chat_reply(
                 msg.group_id,
                 conversation_key,
-                mentions_bot=mentions_bot,
+                force=mentions_bot or should_explain,
             )
             if reply:
                 mention_admin_id = None
@@ -180,8 +188,12 @@ class GroupMessageService:
     def _chat_available(self) -> bool:
         return self.config.group_chat.chat_enabled and self.config.llm.enabled and self.chat_client is not None
 
-    async def _llm_group_chat_reply(self, group_id: int, conversation_key: str, *, mentions_bot: bool) -> str | None:
-        if not self._can_chat(group_id, mentions_bot=mentions_bot):
+    async def _classify(self, text: str) -> Classification:
+        client = self.classifier_client if self.config.llm.enabled else None
+        return await classify_text_with_llm(text, client)
+
+    async def _llm_group_chat_reply(self, group_id: int, conversation_key: str, *, force: bool) -> str | None:
+        if not force and not self._can_chat(group_id, mentions_bot=False):
             return None
         assert self.chat_client is not None
         recent = await self.storage.list_recent_chat_messages(

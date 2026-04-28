@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .classifier import classify_text
+from .classifier import classify_text, classify_text_with_llm
 from .config import BotConfig
 from .group_chat import DORA_PERSONA_PROMPT, GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
@@ -34,6 +34,7 @@ class AdminCommands:
         summaries: SummaryService,
         group_chat: GroupMessageService,
         chat_client: OpenAICompatibleChatClient | None = None,
+        classifier_client: OpenAICompatibleChatClient | None = None,
     ):
         self.base_dir = base_dir
         self.config = config
@@ -43,6 +44,7 @@ class AdminCommands:
         self.summaries = summaries
         self.group_chat = group_chat
         self.chat_client = chat_client
+        self.classifier_client = classifier_client
 
     def is_admin(self, user_id: int, group_id: int | None = None) -> bool:
         if user_id in self.config.admin.user_ids:
@@ -203,7 +205,7 @@ class AdminCommands:
             return None
         conversation_key = self._private_conversation_key(user_id)
         await self.storage.append_chat_message(conversation_key, "user", normalized)
-        classification = classify_text(normalized)
+        classification = await self._classify_private_text(normalized)
         side_effect_note = await self._record_private_chat_feedback(
             normalized,
             user_id=user_id,
@@ -249,6 +251,10 @@ class AdminCommands:
             command=f"/approve feedback {feedback_id}",
         )
         return f"已记录为 #{feedback_id}，可发送 /approve feedback {feedback_id} 批准深度分析。审批 #{approval_id}。"
+
+    async def _classify_private_text(self, text: str):
+        client = self.classifier_client if self.config.llm.enabled else None
+        return await classify_text_with_llm(text, client)
 
     def _fallback_private_chat_reply(self, classification, side_effect_note: str | None) -> str:
         if not classification.should_accept:

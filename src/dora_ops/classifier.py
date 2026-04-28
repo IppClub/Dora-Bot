@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
+from .llm import LLMError, OpenAICompatibleChatClient
 
 
 DORA_KEYWORDS = [
@@ -39,6 +42,40 @@ FEEDBACK_KEYWORDS = [
     "fail",
     "broken",
 ]
+
+
+CLASSIFY_MESSAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "classify_message",
+        "description": "Classify a Dora Bot private or group message and decide whether it should be recorded as feedback.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "should_accept": {
+                    "type": "boolean",
+                    "description": "True only when the message should be recorded as a concrete Dora SSR/YueScript feedback item.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["feedback", "project_question", "possible_feedback_unrelated", "chat"],
+                },
+                "project": {
+                    "type": ["string", "null"],
+                    "enum": ["Dora-SSR", "YueScript", "Dora-SSR/YueScript", None],
+                },
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "needs_repo_analysis": {
+                    "type": "boolean",
+                    "description": "True when the feedback likely needs repository/opencode analysis after admin approval.",
+                },
+                "summary": {"type": "string", "maxLength": 120},
+            },
+            "required": ["should_accept", "kind", "project", "confidence", "needs_repo_analysis", "summary"],
+        },
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -82,3 +119,58 @@ def classify_text(text: str) -> Classification:
     if feedback_hits:
         return Classification(False, "possible_feedback_unrelated", None, 0.45, False, text[:120])
     return Classification(False, "chat", None, 0.25, False, text[:120])
+
+
+async def classify_text_with_llm(
+    text: str,
+    client: OpenAICompatibleChatClient | None,
+    *,
+    fallback: bool = True,
+) -> Classification:
+    if client is None:
+        return classify_text(text)
+    try:
+        result = await client.complete_tool_call(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 Dora Bot 的消息判断器，必须调用 classify_message 工具，不要用正文回答。\n"
+                        "判断用户消息是否需要解释技术问题、是否应记录为 Dora SSR/YueScript 的有效反馈、是否需要仓库分析。\n"
+                        "should_accept 表示是否应该记录为有效反馈，不表示是否需要回复。"
+                        "解释类技术问题请用 kind=project_question 且 should_accept=false；"
+                        "只有明确问题、报错、建议、需求或可跟踪事项才 should_accept=true。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": text,
+                },
+            ],
+            tool=CLASSIFY_MESSAGE_TOOL,
+            tool_name="classify_message",
+        )
+        return _classification_from_mapping(result, original_text=text)
+    except (AttributeError, LLMError, ValueError, TypeError):
+        if fallback:
+            return classify_text(text)
+        raise
+
+
+def _classification_from_mapping(value: dict[str, Any], *, original_text: str) -> Classification:
+    kind = str(value.get("kind") or "chat")
+    if kind not in {"feedback", "project_question", "possible_feedback_unrelated", "chat"}:
+        kind = "chat"
+    project_value = value.get("project")
+    project = str(project_value) if project_value in {"Dora-SSR", "YueScript", "Dora-SSR/YueScript"} else None
+    should_accept = bool(value.get("should_accept"))
+    needs_repo_analysis = bool(value.get("needs_repo_analysis"))
+    try:
+        confidence = float(value.get("confidence", 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
+    confidence = max(0.0, min(confidence, 1.0))
+    summary = str(value.get("summary") or original_text[:120])[:120]
+    if should_accept and kind != "feedback":
+        kind = "feedback"
+    return Classification(should_accept, kind, project, confidence, needs_repo_analysis, summary)

@@ -64,6 +64,17 @@ class FakeChatClient:
         return self.replies.pop(0) if self.replies else ""
 
 
+class FakeClassifierClient:
+    def __init__(self, result: dict[str, object]):
+        self.result = result
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def complete_tool_call(self, messages, *, tool, tool_name):
+        assert tool_name == "classify_message"
+        self.calls.append(messages)
+        return self.result
+
+
 @pytest.mark.asyncio
 async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -184,6 +195,38 @@ async def test_group_chat_llm_empty_response_stays_silent(tmp_path: Path) -> Non
 
     assert result is None
     assert fake.calls
+
+
+@pytest.mark.asyncio
+async def test_group_chat_uses_llm_classifier_for_project_question(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient(["这个先看渲染状态切换和资源生命周期，别一上来就怀疑显卡。"])
+    classifier = FakeClassifierClient(
+        {
+            "should_accept": False,
+            "kind": "project_question",
+            "project": "Dora-SSR",
+            "confidence": 0.87,
+            "needs_repo_analysis": False,
+            "summary": "询问渲染管线拆分",
+        }
+    )
+    runtime.group_chat.chat_client = chat
+    runtime.group_chat.classifier_client = classifier
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="这个帧管线怎么拆比较稳")
+    )
+
+    assert result is not None
+    assert result.reason == "llm_chat"
+    assert result.feedback_id is None
+    assert result.classification.kind == "project_question"
+    assert result.reply == "这个先看渲染状态切换和资源生命周期，别一上来就怀疑显卡。"
+    assert classifier.calls
+    assert chat.calls
 
 
 @pytest.mark.asyncio

@@ -21,16 +21,67 @@ class OpenAICompatibleChatClient:
     async def complete(self, messages: list[dict[str, str]]) -> str:
         return await asyncio.to_thread(self._complete_sync, messages)
 
+    async def complete_tool_call(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        tool: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(self._complete_tool_call_sync, messages, tool, tool_name)
+
     def _complete_sync(self, messages: list[dict[str, str]]) -> str:
+        message = self._request_message(
+            {
+                "model": self.profile.model,
+                "messages": messages,
+                "temperature": self.profile.temperature,
+                "max_tokens": self.profile.max_tokens,
+            }
+        )
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise LLMError("LLM 响应内容为空")
+        return content.strip()
+
+    def _complete_tool_call_sync(
+        self,
+        messages: list[dict[str, str]],
+        tool: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        message = self._request_message(
+            {
+                "model": self.profile.model,
+                "messages": messages,
+                "temperature": self.profile.temperature,
+                "max_tokens": self.profile.max_tokens,
+                "tools": [tool],
+                "tool_choice": {"type": "function", "function": {"name": tool_name}},
+            }
+        )
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            function = tool_calls[0].get("function")
+            if isinstance(function, dict):
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    value = json.loads(arguments)
+                    if isinstance(value, dict):
+                        return value
+        function_call = message.get("function_call")
+        if isinstance(function_call, dict):
+            arguments = function_call.get("arguments")
+            if isinstance(arguments, str):
+                value = json.loads(arguments)
+                if isinstance(value, dict):
+                    return value
+        raise LLMError("LLM 响应缺少工具调用参数")
+
+    def _request_message(self, payload: dict[str, Any]) -> dict[str, Any]:
         api_key = os.environ.get(self.profile.api_key_env)
         if not api_key:
             raise LLMError(f"缺少环境变量：{self.profile.api_key_env}")
-        payload = {
-            "model": self.profile.model,
-            "messages": messages,
-            "temperature": self.profile.temperature,
-            "max_tokens": self.profile.max_tokens,
-        }
         url = f"{self.profile.base_url.rstrip('/')}/chat/completions"
         request = urllib.request.Request(
             url,
@@ -57,7 +108,4 @@ class OpenAICompatibleChatClient:
         message = choices[0].get("message")
         if not isinstance(message, dict):
             raise LLMError("LLM 响应缺少 message")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise LLMError("LLM 响应内容为空")
-        return content.strip()
+        return message

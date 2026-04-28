@@ -67,6 +67,17 @@ class FakeChatClient:
         return self.reply
 
 
+class FakeClassifierClient:
+    def __init__(self, result: dict[str, object]):
+        self.result = result
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def complete_tool_call(self, messages, *, tool, tool_name):
+        assert tool_name == "classify_message"
+        self.calls.append(messages)
+        return self.result
+
+
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -319,6 +330,34 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
         {"role": "assistant", "content": "LLM 多轮回复"},
         {"role": "user", "content": "继续说明一下"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_admin_private_chat_uses_llm_classifier_for_feedback(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    runtime.admin.chat_client = FakeChatClient("收到，已经记下了。")  # type: ignore[assignment]
+    runtime.admin.classifier_client = FakeClassifierClient(
+        {
+            "should_accept": True,
+            "kind": "feedback",
+            "project": "Dora-SSR",
+            "confidence": 0.91,
+            "needs_repo_analysis": True,
+            "summary": "启动后黑屏",
+        }
+    )  # type: ignore[assignment]
+
+    result = await runtime.handle_admin_text("启动后黑屏", user_id=123)
+
+    assert result == "收到，已经记下了。"
+    feedback = await runtime.storage.get_feedback(1)
+    assert feedback is not None
+    assert feedback["project"] == "Dora-SSR"
+    assert feedback["kind"] == "feedback"
+    approval = await runtime.storage.get_pending_approval("feedback", 1)
+    assert approval is not None
 
 
 @pytest.mark.asyncio

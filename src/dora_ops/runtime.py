@@ -21,8 +21,19 @@ class DoraOpsRuntime:
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
         chat_client = OpenAICompatibleChatClient(config.llm.chat) if config.llm.enabled else None
-        self.group_chat = GroupMessageService(config, storage, chat_client)
-        self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries, self.group_chat, chat_client)
+        classifier_client = OpenAICompatibleChatClient(config.llm.classifier) if config.llm.enabled else None
+        self.group_chat = GroupMessageService(config, storage, chat_client, classifier_client)
+        self.admin = AdminCommands(
+            base_dir,
+            config,
+            storage,
+            self.tracker,
+            self.jobs,
+            self.summaries,
+            self.group_chat,
+            chat_client,
+            classifier_client,
+        )
 
     @classmethod
     async def create(cls, config_path: str | Path = "dora-bot.yaml") -> "DoraOpsRuntime":
