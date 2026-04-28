@@ -78,36 +78,6 @@ Inspect the repository only as needed and return JSON only:
 """
 
 
-def recent_commits_prompt(*, repo_name: str, branch: str, timezone: str, hours: int = 24) -> str:
-    return f"""You are analyzing recent repository activity for {repo_name}.
-
-The repository has already been updated with `git pull -f origin {branch}` before this prompt runs.
-Run in read-only mode. Do not edit files. Do not run destructive commands.
-
-Analyze commits from the last {hours} hours in timezone {timezone}.
-
-Use git commands such as:
-- git log --since='{hours} hours ago' --oneline --decorate
-- git log --since='{hours} hours ago' --stat
-- git diff --stat $(git rev-list -1 --before='{hours} hours ago' HEAD)..HEAD
-- git show --stat <commit>
-
-Return JSON only:
-{{
-  "summary": "short Chinese maintainer-facing summary",
-  "time_window": "last {hours} hours",
-  "commits": ["..."],
-  "user_visible_changes": ["..."],
-  "developer_notes": ["..."],
-  "risks": ["..."],
-  "recommended_actions": ["..."],
-  "announcement": "short QQ announcement draft, or empty string",
-  "should_notify_group": false,
-  "confidence": "low|medium|high"
-}}
-"""
-
-
 def yesterday_progress_prompt(*, repo_name: str, branch: str, timezone: str) -> str:
     return f"""You are preparing a daily maintainer progress report for {repo_name}.
 

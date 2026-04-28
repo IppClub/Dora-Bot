@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 from .classifier import classify_text
-from .config import BotConfig, resolve_path
+from .config import BotConfig
 from .jobs import JobManager
-from .prompts import feedback_analysis_prompt, recent_commits_prompt, repo_diff_prompt
+from .prompts import feedback_analysis_prompt, repo_diff_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
@@ -95,19 +95,8 @@ class AdminCommands:
 
         if command == "repo-check":
             repo_key = self._repo_key(arg)
-            try:
-                job_id = await self._create_recent_repo_check(repo_key, triggered_by=triggered_by)
-            except (FileNotFoundError, ValueError) as exc:
-                return f"创建最近 24 小时仓库分析失败：{exc}"
-            repo = self.config.repositories[repo_key]
-            return "\n".join(
-                [
-                    f"最近 24 小时仓库分析任务已创建：#{job_id}",
-                    f"仓库：{repo.name}",
-                    f"分支：{repo.default_branch}",
-                    "查看状态：/test job-status --include-test",
-                ]
-            )
+            result = await self.tracker.check_repo(repo_key, is_test=True, triggered_by=triggered_by)
+            return self._repo_check_text(result)
 
         if command == "tmux":
             job_id = await self.jobs.create_tmux_echo_test(triggered_by=triggered_by)
@@ -197,28 +186,6 @@ class AdminCommands:
                 f"群={approval['requested_group_id'] or '-'} 命令：{approval['command']}"
             )
         return "\n".join(lines)
-
-    async def _create_recent_repo_check(self, repo_key: str, *, triggered_by: str | None = None) -> int:
-        repo = self.config.repositories[repo_key]
-        if repo.local_path is None:
-            raise ValueError(f"{repo_key} 缺少 repositories.{repo_key}.local_path 配置")
-        repo_path = resolve_path(self.base_dir, repo.local_path)
-        if not repo_path.exists():
-            raise FileNotFoundError(f"{repo_key} 本地仓库不存在：{repo_path}")
-        prompt = recent_commits_prompt(
-            repo_name=repo.name,
-            branch=repo.default_branch,
-            timezone=self.config.scheduler.timezone,
-            hours=24,
-        )
-        return await self.jobs.create_recent_commits_analysis(
-            repo_key,
-            repo_path,
-            repo.default_branch,
-            prompt,
-            triggered_by=triggered_by,
-            is_test=True,
-        )
 
     @staticmethod
     def _job_status_text(job: dict[str, object]) -> str:
