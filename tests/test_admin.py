@@ -321,6 +321,7 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
     assert "坏酷又讨人喜欢的小萝莉" in system_prompt
     assert "# 多萝能做什么" in system_prompt
     assert "/approve feedback <id>" in system_prompt
+    assert "/test daily-summary --progress" in system_prompt
     assert "# 能力触发规则" in system_prompt
     assert "普通闲聊、无关内容或信息不足" in system_prompt
     assert "表面冷漠但内心温暖" in system_prompt

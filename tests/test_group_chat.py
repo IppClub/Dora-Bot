@@ -169,7 +169,8 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert "# 角色设定" in system_prompt
     assert "坏酷又讨人喜欢的小萝莉" in system_prompt
     assert "# 多萝能做什么" in system_prompt
-    assert "/test daily-summary --progress" in system_prompt
+    assert "/test daily-summary --progress" not in system_prompt
+    assert "/approve feedback <id>" not in system_prompt
     assert "不能假装已经执行命令" in system_prompt
     assert "# 能力触发规则" in system_prompt
     assert "报错、崩溃、无法、不能、失败" in system_prompt

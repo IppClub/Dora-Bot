@@ -281,7 +281,8 @@ class AdminCommands:
                     "# 私聊任务规则\n"
                     "- 你正在和管理员私聊，继续使用多萝人格，但优先清楚处理维护事务。\n"
                     "- 使用简洁中文回复管理员。\n"
-                    "- 可以帮助记录反馈、说明审批命令、回答测试命令用法。\n"
+                    "- 可以帮助记录反馈、说明 /approvals、/approve feedback <id>、/reject feedback <id> 等审批命令。\n"
+                    "- 可以说明 /test ping、/test group-chat、/test opencode、/test daily-summary --progress、/test job-status --include-test 等测试命令的用途。\n"
                     "- 不要声称已经执行未执行的操作。"
                 ),
             }
