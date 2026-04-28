@@ -32,6 +32,7 @@ class GroupChatConfig(BaseModel):
 class RepositoryConfig(BaseModel):
     name: str
     remote: str
+    local_path: Path | None = None
     default_branch: str = "main"
     watch_tags: bool = True
     watch_paths: list[str] = Field(default_factory=list)
@@ -59,7 +60,7 @@ class LLMConfig(BaseModel):
 
 
 class SchedulerConfig(BaseModel):
-    daily_summary_time: str = "23:00"
+    daily_summary_time: str = "08:00"
     timezone: str = "Asia/Shanghai"
 
 

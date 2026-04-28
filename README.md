@@ -100,6 +100,27 @@ When group chat records a feedback item that needs deeper repository analysis, i
 Approving a feedback item creates a tmux/opencode job against the corresponding repository mirror.
 The group acknowledgement mentions the first configured admin QQ via NcatBot's `post_group_msg(..., at=<qq>)` helper.
 
+Daily project progress reports run at `scheduler.daily_summary_time`, which defaults to `08:00`. The report jobs use the configured working repositories directly:
+
+```yaml
+repositories:
+  dora_ssr:
+    local_path: /root/Workspace/Dora-SSR
+  yuescript:
+    local_path: /root/Workspace/YueScript
+
+scheduler:
+  daily_summary_time: "08:00"
+```
+
+At the scheduled time the bot creates one opencode job per repository. Each job runs in the repository directory, executes `git pull -f origin <branch>`, then asks opencode to analyze yesterday's changes.
+
+Manual test trigger:
+
+```text
+/test daily-summary --progress
+```
+
 NcatBot startup:
 
 ```bash

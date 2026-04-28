@@ -126,6 +126,18 @@ class AdminCommands:
 
         if command == "daily-summary":
             dry_run = "--dry-run" in arg
+            if "--progress" in arg:
+                try:
+                    created = await self.summaries.create_yesterday_progress_jobs(
+                        self.jobs,
+                        triggered_by=triggered_by,
+                        is_test=True,
+                    )
+                except (FileNotFoundError, ValueError) as exc:
+                    return f"创建昨日进展分析失败：{exc}"
+                lines = ["昨日进展分析任务已创建："]
+                lines.extend(f"- {repo_key}: job #{job_id}" for repo_key, job_id in created)
+                return "\n".join(lines)
             return await self.summaries.build_daily_summary(dry_run=dry_run, include_test=True)
 
         if command == "job-status":
@@ -155,6 +167,7 @@ class AdminCommands:
                 "/test tmux",
                 "/test opencode Dora-SSR|YueScript",
                 "/test daily-summary --dry-run",
+                "/test daily-summary --progress",
                 "/test job-status --include-test",
                 "/approvals",
                 "/approve feedback <id>",

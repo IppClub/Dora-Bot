@@ -76,3 +76,34 @@ Inspect the repository only as needed and return JSON only:
   "confidence": "low|medium|high"
 }}
 """
+
+
+def yesterday_progress_prompt(*, repo_name: str, branch: str, timezone: str) -> str:
+    return f"""You are preparing a daily maintainer progress report for {repo_name}.
+
+The repository has already been updated with `git pull -f origin {branch}` before this prompt runs.
+Run in read-only mode. Do not edit files. Do not run destructive commands.
+
+Analyze yesterday's repository changes in timezone {timezone}:
+- from yesterday 00:00
+- until today 00:00
+
+Use git commands such as:
+- git log --since='yesterday 00:00' --until='today 00:00' --oneline
+- git diff --stat <range>
+- git diff --name-only <range>
+- git show --stat <commit>
+
+Return JSON only:
+{{
+  "summary": "short Chinese maintainer-facing summary",
+  "commits": ["..."],
+  "user_visible_changes": ["..."],
+  "developer_notes": ["..."],
+  "risks": ["..."],
+  "recommended_actions": ["..."],
+  "announcement": "short QQ announcement draft, or empty string",
+  "should_notify_group": false,
+  "confidence": "low|medium|high"
+}}
+"""

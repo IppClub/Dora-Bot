@@ -118,6 +118,48 @@ class JobManager:
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         return job_id
 
+    async def create_yesterday_progress_analysis(
+        self,
+        repo_key: str,
+        repo_path: Path,
+        branch: str,
+        prompt_text: str,
+        *,
+        triggered_by: str | None = None,
+        trigger_source: str = "daily_scheduler",
+        is_test: bool = False,
+    ) -> int:
+        job_dir = self._next_job_dir("progress")
+        prompt = job_dir / "prompt.md"
+        output = job_dir / "output.json"
+        error = job_dir / "error.log"
+        exit_code = job_dir / "exit_code"
+        done = job_dir / "done"
+        prompt.write_text(prompt_text, encoding="utf-8")
+        session = f"dora_job_{int(time.time())}_{repo_key}_progress"
+        job_id = await self.storage.create_job(
+            kind="daily_progress",
+            target_type="repository",
+            target_id=None,
+            tmux_session=session,
+            prompt_path=prompt,
+            output_path=output,
+            error_path=error,
+            exit_code_path=exit_code,
+            done_path=done,
+            is_test=is_test,
+            triggered_by=triggered_by,
+            trigger_source=trigger_source,
+        )
+        opencode = self.config.jobs.opencode_command
+        command = (
+            f"cd {shlex.quote(str(repo_path))} && "
+            f"git pull -f origin {shlex.quote(branch)} && "
+            f"{opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        )
+        await self._start_tmux_job(job_id, session, command, error, exit_code, done)
+        return job_id
+
     async def reconcile_job(self, job: dict[str, object]) -> JobStatus | None:
         job_id = int(job["id"])
         done_path = Path(str(job["done_path"]))

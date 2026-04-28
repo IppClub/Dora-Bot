@@ -46,3 +46,14 @@ async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     classified = await runtime.handle_admin_text("/test classify YueScript switch 报错", user_id=123)
     assert classified is not None
     assert "YueScript" in classified
+
+
+@pytest.mark.asyncio
+async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text("/test daily-summary --progress", user_id=123)
+    assert result is not None
+    assert "缺少" in result

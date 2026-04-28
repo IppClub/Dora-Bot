@@ -5,6 +5,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .config import BotConfig, resolve_path
+from .jobs import JobManager
+from .prompts import yesterday_progress_prompt
 from .storage import Storage
 
 
@@ -41,3 +43,33 @@ class SummaryService:
             date = datetime.now(ZoneInfo(self.config.scheduler.timezone)).date().isoformat()
             (out_dir / f"{date}.md").write_text(result, encoding="utf-8")
         return result
+
+    async def create_yesterday_progress_jobs(
+        self,
+        jobs: JobManager,
+        *,
+        triggered_by: str | None = None,
+        is_test: bool = False,
+    ) -> list[tuple[str, int]]:
+        created: list[tuple[str, int]] = []
+        for repo_key, repo in self.config.repositories.items():
+            if repo.local_path is None:
+                raise ValueError(f"{repo_key} 缺少 repositories.{repo_key}.local_path 配置")
+            if not repo.local_path.exists():
+                raise FileNotFoundError(f"{repo_key} 本地仓库不存在：{repo.local_path}")
+            prompt = yesterday_progress_prompt(
+                repo_name=repo.name,
+                branch=repo.default_branch,
+                timezone=self.config.scheduler.timezone,
+            )
+            job_id = await jobs.create_yesterday_progress_analysis(
+                repo_key,
+                repo.local_path,
+                repo.default_branch,
+                prompt,
+                triggered_by=triggered_by,
+                trigger_source="admin_command" if is_test else "daily_scheduler",
+                is_test=is_test,
+            )
+            created.append((repo_key, job_id))
+        return created

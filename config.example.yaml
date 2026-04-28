@@ -26,6 +26,7 @@ repositories:
   dora_ssr:
     name: Dora SSR
     remote: https://gitcode.com/ippclub/Dora-SSR.git
+    local_path: /root/Workspace/Dora-SSR
     default_branch: main
     watch_tags: true
     watch_paths:
@@ -37,6 +38,7 @@ repositories:
   yuescript:
     name: YueScript
     remote: https://gitcode.com/ippclub/YueScript.git
+    local_path: /root/Workspace/YueScript
     default_branch: main
     watch_tags: true
     watch_paths:
@@ -69,5 +71,5 @@ llm:
     timeout_seconds: 60
 
 scheduler:
-  daily_summary_time: "23:00"
+  daily_summary_time: "08:00"
   timezone: Asia/Shanghai
