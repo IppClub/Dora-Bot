@@ -107,11 +107,11 @@ class FakeQQAPI:
         self.private_messages = []
         self.group_messages = []
 
-    async def send_private_msg(self, user_id, message):
-        self.private_messages.append((user_id, message))
+    async def post_private_msg(self, user_id, **kwargs):
+        self.private_messages.append((user_id, kwargs))
 
-    async def send_group_msg(self, group_id, message):
-        self.group_messages.append((group_id, message))
+    async def post_group_msg(self, group_id, **kwargs):
+        self.group_messages.append((group_id, kwargs))
 
 
 @pytest.mark.asyncio
@@ -182,17 +182,8 @@ async def test_plugin_sends_messages_through_ncatbot_qq_api() -> None:
     await plugin._send_private_reply(123, "私聊")
     await plugin._send_group_reply(456, "群聊", at_user_id=789)
 
-    assert qq.private_messages == [(123, [{"type": "text", "data": {"text": "私聊"}}])]
-    assert qq.group_messages == [
-        (
-            456,
-            [
-                {"type": "at", "data": {"qq": "789"}},
-                {"type": "text", "data": {"text": " "}},
-                {"type": "text", "data": {"text": "群聊"}},
-            ],
-        )
-    ]
+    assert qq.private_messages == [(123, {"text": "私聊"})]
+    assert qq.group_messages == [(456, {"text": "群聊", "at": 789})]
 
 
 @pytest.mark.asyncio

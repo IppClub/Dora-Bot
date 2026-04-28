@@ -225,19 +225,13 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         return ""
 
     async def _send_private_reply(self, user_id: int, text: str) -> None:
-        await self.api.qq.send_private_msg(user_id, self._text_message(text))
+        await self.api.qq.post_private_msg(user_id, text=text)
 
     async def _send_group_reply(self, group_id: int, text: str, at_user_id: int | None = None) -> None:
-        message = []
         if at_user_id is not None:
-            message.append({"type": "at", "data": {"qq": str(at_user_id)}})
-            message.append({"type": "text", "data": {"text": " "}})
-        message.extend(self._text_message(text))
-        await self.api.qq.send_group_msg(group_id, message)
-
-    @staticmethod
-    def _text_message(text: str) -> list[dict[str, dict[str, str]]]:
-        return [{"type": "text", "data": {"text": text}}]
+            await self.api.qq.post_group_msg(group_id, text=text, at=at_user_id)
+            return
+        await self.api.qq.post_group_msg(group_id, text=text)
 
     def _daily_summary_group_ids(self) -> list[int]:
         configured = self.runtime.config.scheduler.daily_summary_group_ids
