@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
+import logging
 import time
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,15 @@ from .classifier import Classification, classify_text_with_llm
 from .config import BotConfig
 from .llm import LLMError, OpenAICompatibleChatClient
 from .storage import Storage
+
+
+try:
+    from ncatbot.utils import get_log
+except Exception:  # pragma: no cover - lets core tests run without NcatBot internals.
+    get_log = None  # type: ignore[assignment]
+
+
+logger = get_log("DoraOps.GroupChat") if get_log is not None else logging.getLogger(__name__)
 
 
 DORA_PERSONA_PROMPT = """# 角色设定
@@ -91,17 +101,28 @@ class GroupMessageService:
     async def handle(self, msg: GroupMessageInput) -> GroupMessageResult | None:
         cfg = self.config.group_chat
         if not cfg.enabled:
+            logger.info("group chat skipped: disabled group=%s user=%s", msg.group_id, msg.user_id)
             return None
         if cfg.enabled_group_ids and msg.group_id not in cfg.enabled_group_ids:
+            logger.info(
+                "group chat skipped: group not enabled group=%s user=%s enabled_groups=%s",
+                msg.group_id,
+                msg.user_id,
+                sorted(cfg.enabled_group_ids),
+            )
             return None
 
         text = msg.text.strip()
+        mentions_bot = msg.mentions_bot or self._contains_alias(text)
         if not text:
-            return None
+            if not mentions_bot:
+                logger.info("group chat skipped: empty text group=%s user=%s", msg.group_id, msg.user_id)
+                return None
+            text = "@多萝"
         if text.startswith("/test"):
+            logger.info("group chat skipped: test command ignored group=%s user=%s", msg.group_id, msg.user_id)
             return None
 
-        mentions_bot = msg.mentions_bot or self._contains_alias(text)
         conversation_key = self._group_conversation_key(msg.group_id)
         await self.storage.append_chat_message(
             conversation_key,
@@ -109,9 +130,27 @@ class GroupMessageService:
             self._format_group_user_message(msg.nickname, text, mentions_bot=mentions_bot),
         )
         classification = await self._classify(text)
+        logger.info(
+            "group chat classified: group=%s user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f mentions=%s",
+            msg.group_id,
+            msg.user_id,
+            classification.kind,
+            classification.project,
+            classification.should_accept,
+            classification.needs_repo_analysis,
+            classification.confidence,
+            mentions_bot,
+        )
         can_chat = self._can_chat(msg.group_id, mentions_bot=mentions_bot)
         should_explain = classification.kind == "project_question"
         if not classification.should_accept and not mentions_bot and not can_chat and not should_explain:
+            logger.info(
+                "group chat skipped: no trigger group=%s user=%s can_chat=%s should_explain=%s",
+                msg.group_id,
+                msg.user_id,
+                can_chat,
+                should_explain,
+            )
             return None
 
         feedback_id: int | None = None
@@ -166,9 +205,20 @@ class GroupMessageService:
                 reason = "llm_chat"
         if reply is None:
             if not classification.should_accept:
+                logger.info("group chat no reply: classification did not require response group=%s user=%s", msg.group_id, msg.user_id)
                 return None
+            logger.info("group chat recorded without reply: group=%s user=%s feedback=%s reason=%s", msg.group_id, msg.user_id, feedback_id, reason)
             return GroupMessageResult(classification, feedback_id, approval_id, None, mention_admin_id, accepted_for_analysis, reason)
         await self.storage.append_chat_message(conversation_key, "assistant", reply)
+        logger.info(
+            "group chat reply ready: group=%s user=%s reason=%s feedback=%s approval=%s reply_len=%s",
+            msg.group_id,
+            msg.user_id,
+            reason,
+            feedback_id,
+            approval_id,
+            len(reply),
+        )
         return GroupMessageResult(classification, feedback_id, approval_id, reply, mention_admin_id, accepted_for_analysis, reason)
 
     def _contains_alias(self, text: str) -> bool:
@@ -208,10 +258,12 @@ class GroupMessageService:
         messages.append({"role": "user", "content": "请根据上述规则判断是否需要回复，并严格按格式输出。"})
         try:
             reply = await self.chat_client.complete(messages)
-        except LLMError:
+        except LLMError as exc:
+            logger.info("group chat llm reply failed: group=%s error=%s", group_id, exc)
             return None
         reply = reply.strip().strip('"')
         if not reply:
+            logger.info("group chat llm reply empty: group=%s", group_id)
             return None
         self._last_chat_reply_at[group_id] = time.monotonic()
         return reply
