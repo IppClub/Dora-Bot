@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .classifier import classify_text
 from .config import BotConfig
-from .group_chat import GroupMessageInput, GroupMessageResult, GroupMessageService
+from .group_chat import DORA_PERSONA_PROMPT, GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
 from .llm import LLMError, OpenAICompatibleChatClient
 from .prompts import feedback_analysis_prompt, repo_diff_prompt
@@ -275,10 +275,12 @@ class AdminCommands:
             {
                 "role": "system",
                 "content": (
-                    "你是 Dora SSR 和 YueScript 项目的维护助手。"
-                    "使用简洁中文回复管理员。"
-                    "可以帮助记录反馈、说明审批命令、回答测试命令用法。"
-                    "不要声称已经执行未执行的操作。"
+                    f"{DORA_PERSONA_PROMPT}\n\n"
+                    "# 私聊任务规则\n"
+                    "- 你正在和管理员私聊，继续使用多萝人格，但优先清楚处理维护事务。\n"
+                    "- 使用简洁中文回复管理员。\n"
+                    "- 可以帮助记录反馈、说明审批命令、回答测试命令用法。\n"
+                    "- 不要声称已经执行未执行的操作。"
                 ),
             }
         ]

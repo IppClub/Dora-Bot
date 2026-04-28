@@ -208,6 +208,11 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
 
     assert len(fake.calls) == 2
     last_call = fake.calls[-1]
+    system_prompt = last_call[0]["content"]
+    assert "# 角色设定" in system_prompt
+    assert "坏酷又讨人喜欢的小萝莉" in system_prompt
+    assert "表面冷漠但内心温暖" in system_prompt
+    assert "# 私聊任务规则" in system_prompt
     chat_messages = [message for message in last_call if message["role"] in {"user", "assistant"}]
     assert chat_messages == [
         {"role": "assistant", "content": "LLM 多轮回复"},
