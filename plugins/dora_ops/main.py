@@ -44,6 +44,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             text = getattr(event, "raw_message", "") or self._extract_text(event)
             user_id = int(getattr(getattr(event, "sender", None), "user_id", 0) or getattr(event, "user_id", 0))
             group_id = int(getattr(event, "group_id", 0))
+            admin_result = await self.runtime.handle_admin_text(text, user_id=user_id, group_id=group_id)
+            if admin_result:
+                await self._send_group_reply(group_id, admin_result)
+                return
             group_result = await self.runtime.handle_group_message(
                 GroupMessageInput(
                     group_id=group_id,
@@ -69,6 +73,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             text = getattr(msg, "raw_message", "") or self._extract_text(msg)
             user_id = int(getattr(getattr(msg, "sender", None), "user_id", 0) or getattr(msg, "user_id", 0))
             group_id = int(getattr(msg, "group_id", 0))
+            admin_result = await self.runtime.handle_admin_text(text, user_id=user_id, group_id=group_id)
+            if admin_result:
+                await self._send_group_reply(group_id, admin_result)
+                return
             group_result = await self.runtime.handle_group_message(
                 GroupMessageInput(
                     group_id=group_id,

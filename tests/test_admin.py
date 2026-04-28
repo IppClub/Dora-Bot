@@ -47,6 +47,10 @@ async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     assert classified is not None
     assert "YueScript" in classified
 
+    group_pong = await runtime.handle_admin_text("/test ping", user_id=123, group_id=456)
+    assert group_pong is not None
+    assert "pong" in group_pong
+
 
 @pytest.mark.asyncio
 async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> None:
@@ -57,6 +61,45 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
     result = await runtime.handle_admin_text("/test daily-summary --progress", user_id=123)
     assert result is not None
     assert "缺少" in result
+
+
+@pytest.mark.asyncio
+async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text(
+        "/test group-chat 456 Dora SSR Web IDE 创建文件后无法刷新",
+        user_id=123,
+    )
+
+    assert result is not None
+    assert "群聊测试结果：" in result
+    assert "群：456" in result
+    assert "分类：feedback" in result
+    assert "项目：Dora-SSR" in result
+    assert "记录：1" in result
+    assert "审批：1" in result
+    assert "回复：收到" in result
+    feedback = await runtime.storage.get_feedback(1)
+    assert feedback is not None
+    assert feedback["group_id"] == 456
+
+
+@pytest.mark.asyncio
+async def test_group_chat_test_uses_current_group_when_group_id_is_omitted(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    private_error = await runtime.handle_admin_text("/test group-chat Dora SSR 报错", user_id=123)
+    assert private_error == "私聊测试群聊时需要指定群号：/test group-chat <群号> <文本>"
+
+    result = await runtime.handle_admin_text("/test group-chat Dora SSR 报错", user_id=123, group_id=789)
+    assert result is not None
+    assert "群：789" in result
+    assert "分类：feedback" in result
 
 
 @pytest.mark.asyncio

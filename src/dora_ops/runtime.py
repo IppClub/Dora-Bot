@@ -19,8 +19,8 @@ class DoraOpsRuntime:
         self.tracker = RepoTracker(base_dir, config, storage)
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
-        self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries)
         self.group_chat = GroupMessageService(config, storage)
+        self.admin = AdminCommands(base_dir, config, storage, self.tracker, self.jobs, self.summaries, self.group_chat)
 
     @classmethod
     async def create(cls, config_path: str | Path = "dora-bot.yaml") -> "DoraOpsRuntime":
