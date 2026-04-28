@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from pathlib import Path
 import re
 from typing import Awaitable, Callable
@@ -10,11 +9,9 @@ from typing import Awaitable, Callable
 try:
     from ncatbot.plugin import NcatBotPlugin
     from ncatbot.core import registrar
-    from ncatbot.utils import get_log
 except Exception:  # pragma: no cover - lets core tests run without NcatBot internals.
     NcatBotPlugin = object  # type: ignore[misc,assignment]
     registrar = None  # type: ignore[assignment]
-    get_log = None  # type: ignore[assignment]
 
 from dora_ops.runtime import DoraOpsRuntime
 from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupMessageInput
@@ -24,7 +21,6 @@ from dora_ops.models import JobStatus
 
 PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
 PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
-logger = get_log("DoraOps") if get_log is not None else logging.getLogger(__name__)
 
 
 class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
@@ -33,14 +29,6 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     async def on_load(self) -> None:
         self.runtime = await DoraOpsRuntime.create(Path("dora-bot.yaml"))
-        logger.info(
-            "dora_ops loaded: admins=%s admin_groups=%s group_enabled=%s group_ids=%s llm_enabled=%s",
-            sorted(self.runtime.config.admin.user_ids),
-            sorted(self.runtime.config.admin.group_ids),
-            self.runtime.config.group_chat.enabled,
-            sorted(self.runtime.config.group_chat.enabled_group_ids),
-            self.runtime.config.llm.enabled,
-        )
         if hasattr(self, "add_scheduled_task"):
             self.add_scheduled_task(
                 "daily_progress_report",
@@ -59,44 +47,26 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
         @registrar.qq.on_private_message()
         async def on_private_message(self, event) -> None:
-            text = self._message_text(event)
+            text = getattr(event, "raw_message", "") or getattr(event, "text", "")
             user_id = int(getattr(event, "user_id", 0))
-            logger.info("private message received: user=%s text=%r", user_id, self._clip_log(text))
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
-            logger.info("private message handled: user=%s replied=%s", user_id, bool(result))
             if result:
                 await event.reply(text=result)
                 self._maybe_watch_daily_progress(text, result, lambda message: event.reply(text=message))
 
         @registrar.qq.on_group_message()
         async def on_group_message(self, event) -> None:
-            text = self._message_text(event)
+            text = getattr(event, "raw_message", "") or self._extract_text(event)
             user_id = int(getattr(getattr(event, "sender", None), "user_id", 0) or getattr(event, "user_id", 0))
             group_id = int(getattr(event, "group_id", 0))
-            mentions_bot = self._mentions_bot(event)
-            logger.info(
-                "group message received: group=%s user=%s mentions_bot=%s text=%r",
-                group_id,
-                user_id,
-                mentions_bot,
-                self._clip_log(text),
-            )
             group_result = await self.runtime.handle_group_message(
                 GroupMessageInput(
                     group_id=group_id,
                     user_id=user_id,
                     nickname=str(getattr(getattr(event, "sender", None), "nickname", "")),
                     text=text,
-                    mentions_bot=mentions_bot,
+                    mentions_bot=self._mentions_bot(event),
                 )
-            )
-            logger.info(
-                "group message handled: group=%s user=%s result=%s replied=%s reason=%s",
-                group_id,
-                user_id,
-                bool(group_result),
-                bool(group_result and group_result.reply),
-                getattr(group_result, "reason", None),
             )
             if group_result and group_result.reply:
                 await self._send_group_reply(group_id, group_result.reply, group_result.mention_admin_id)
@@ -104,11 +74,9 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     else:
 
         async def on_private_message(self, msg) -> None:
-            text = self._message_text(msg)
+            text = getattr(msg, "raw_message", "") or getattr(msg, "text", "")
             user_id = int(getattr(msg, "user_id", 0))
-            logger.info("private message received: user=%s text=%r", user_id, self._clip_log(text))
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
-            logger.info("private message handled: user=%s replied=%s", user_id, bool(result))
             if result:
                 await self.api.post_private_msg(user_id, text=result)
                 self._maybe_watch_daily_progress(
@@ -118,111 +86,35 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 )
 
         async def on_group_message(self, msg) -> None:
-            text = self._message_text(msg)
+            text = getattr(msg, "raw_message", "") or self._extract_text(msg)
             user_id = int(getattr(getattr(msg, "sender", None), "user_id", 0) or getattr(msg, "user_id", 0))
             group_id = int(getattr(msg, "group_id", 0))
-            mentions_bot = self._mentions_bot(msg)
-            logger.info(
-                "group message received: group=%s user=%s mentions_bot=%s text=%r",
-                group_id,
-                user_id,
-                mentions_bot,
-                self._clip_log(text),
-            )
             group_result = await self.runtime.handle_group_message(
                 GroupMessageInput(
                     group_id=group_id,
                     user_id=user_id,
                     nickname=str(getattr(getattr(msg, "sender", None), "nickname", "")),
                     text=text,
-                    mentions_bot=mentions_bot,
+                    mentions_bot=self._mentions_bot(msg),
                 )
-            )
-            logger.info(
-                "group message handled: group=%s user=%s result=%s replied=%s reason=%s",
-                group_id,
-                user_id,
-                bool(group_result),
-                bool(group_result and group_result.reply),
-                getattr(group_result, "reason", None),
             )
             if group_result and group_result.reply:
                 await self._send_group_reply(group_id, group_result.reply, group_result.mention_admin_id)
 
     @staticmethod
-    def _message_text(msg) -> str:
-        return str(getattr(msg, "raw_message", "") or getattr(msg, "text", "") or DoraOpsPlugin._extract_text(msg))
-
-    @staticmethod
-    def _clip_log(text: str, limit: int = 160) -> str:
-        compact = " ".join(str(text).split())
-        return compact if len(compact) <= limit else f"{compact[:limit].rstrip()}..."
-
-    @staticmethod
     def _extract_text(msg) -> str:
-        message = getattr(msg, "message", []) or []
-        text = getattr(message, "text", None)
-        if isinstance(text, str):
-            return text
         chunks: list[str] = []
-        for item in message:
-            if DoraOpsPlugin._segment_type(item) == "text":
-                chunks.append(DoraOpsPlugin._segment_text(item))
+        for item in getattr(msg, "message", []) or []:
+            if item.get("type") == "text":
+                chunks.append(item.get("data", {}).get("text", ""))
         return "".join(chunks)
 
     @staticmethod
     def _mentions_bot(msg) -> bool:
-        message = getattr(msg, "message", []) or []
-        try:
-            if message.filter_at():
-                return True
-        except AttributeError:
-            pass
-        for item in message:
-            if DoraOpsPlugin._segment_type(item) == "at":
+        for item in getattr(msg, "message", []) or []:
+            if item.get("type") == "at":
                 return True
         return False
-
-    @staticmethod
-    def _segment_type(item) -> str:
-        if isinstance(item, dict):
-            return str(item.get("type") or "")
-        to_dict = getattr(item, "to_dict", None)
-        if callable(to_dict):
-            data = to_dict()
-            if isinstance(data, dict):
-                return str(data.get("type") or "")
-        value = getattr(item, "type", None) or getattr(item, "message_type", None)
-        if value is not None:
-            return str(value)
-        name = type(item).__name__.lower()
-        if "plain" in name or "text" in name:
-            return "text"
-        if name in {"at", "mention"} or "at" == name:
-            return "at"
-        return ""
-
-    @staticmethod
-    def _segment_text(item) -> str:
-        if isinstance(item, dict):
-            data = item.get("data", {})
-            if isinstance(data, dict):
-                return str(data.get("text") or "")
-            return ""
-        to_dict = getattr(item, "to_dict", None)
-        if callable(to_dict):
-            data = to_dict()
-            if isinstance(data, dict):
-                segment_data = data.get("data", {})
-                if isinstance(segment_data, dict):
-                    return str(segment_data.get("text") or "")
-        for attr in ("text", "content", "data"):
-            value = getattr(item, attr, None)
-            if isinstance(value, str):
-                return value
-            if isinstance(value, dict):
-                return str(value.get("text") or "")
-        return ""
 
     async def _send_group_reply(self, group_id: int, text: str, at_user_id: int | None = None) -> None:
         if at_user_id is not None:

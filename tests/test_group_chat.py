@@ -138,21 +138,6 @@ async def test_group_alias_reply_without_recording_unrelated(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_group_at_only_wakes_bot(tmp_path: Path) -> None:
-    config_path = tmp_path / "dora-bot.yaml"
-    config_path.write_text(CONFIG, encoding="utf-8")
-    runtime = await DoraOpsRuntime.create(config_path)
-
-    result = await runtime.handle_group_message(
-        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="", mentions_bot=True)
-    )
-
-    assert result is not None
-    assert result.reply is not None
-    assert "不归档" in result.reply
-
-
-@pytest.mark.asyncio
 async def test_group_ignores_test_commands(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")

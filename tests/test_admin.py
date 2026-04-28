@@ -78,30 +78,6 @@ class FakeClassifierClient:
         return self.result
 
 
-class FakePlainText:
-    def __init__(self, text: str):
-        self.text = text
-
-
-class FakeAt:
-    type = "at"
-
-
-class FakeMessageArray:
-    text = "array text"
-
-    def __iter__(self):
-        return iter([])
-
-    def filter_at(self):
-        return [FakeAt()]
-
-
-class FakeToDictText:
-    def to_dict(self):
-        return {"type": "text", "data": {"text": "dict text"}}
-
-
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -132,33 +108,6 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
     result = await runtime.handle_admin_text("/test daily-summary --progress", user_id=123)
     assert result is not None
     assert "缺少" in result
-
-
-def test_plugin_message_segments_support_ncatbot_objects() -> None:
-    msg = SimpleNamespace(message=[FakePlainText("准备 "), FakePlainText("尝试一种模式"), FakeAt()])
-
-    assert DoraOpsPlugin._message_text(msg) == "准备 尝试一种模式"
-    assert DoraOpsPlugin._extract_text(msg) == "准备 尝试一种模式"
-    assert DoraOpsPlugin._mentions_bot(msg) is True
-
-
-def test_plugin_message_text_prefers_raw_message() -> None:
-    msg = SimpleNamespace(raw_message="/test help", text="", message=[FakePlainText("ignored")])
-
-    assert DoraOpsPlugin._message_text(msg) == "/test help"
-
-
-def test_plugin_message_segments_support_message_array_helpers() -> None:
-    msg = SimpleNamespace(message=FakeMessageArray())
-
-    assert DoraOpsPlugin._extract_text(msg) == "array text"
-    assert DoraOpsPlugin._mentions_bot(msg) is True
-
-
-def test_plugin_message_segments_support_to_dict_objects() -> None:
-    msg = SimpleNamespace(message=[FakeToDictText()])
-
-    assert DoraOpsPlugin._extract_text(msg) == "dict text"
 
 
 @pytest.mark.asyncio
