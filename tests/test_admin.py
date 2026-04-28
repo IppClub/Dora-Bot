@@ -32,7 +32,7 @@ repositories:
 
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
@@ -50,7 +50,7 @@ async def test_admin_ping_and_classify(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 

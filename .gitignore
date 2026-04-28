@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 
+dora-bot.yaml
 config.yaml
 data/
 mirrors/

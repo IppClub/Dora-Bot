@@ -20,9 +20,9 @@ fi
 
 cd "$ROOT_DIR"
 
-if [[ ! -f config.yaml ]]; then
-  cp config.example.yaml config.yaml
-  echo "Created config.yaml from config.example.yaml. Edit admin/bot settings before production use."
+if [[ ! -f dora-bot.yaml ]]; then
+  cp dora-bot.example.yaml dora-bot.yaml
+  echo "Created dora-bot.yaml from dora-bot.example.yaml. Edit admin/bot settings before production use."
 fi
 
 tmux new-session -d -s "$SESSION_NAME" \

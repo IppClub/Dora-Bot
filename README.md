@@ -13,9 +13,9 @@ The runtime is split into a testable core package and a thin NcatBot plugin adap
 
 - `src/dora_ops/`: storage, repo tracking, tmux jobs, summaries, admin commands.
 - `plugins/dora_ops/`: NcatBot plugin entrypoint.
-- `config.example.yaml`: starter configuration.
+- `dora-bot.example.yaml`: starter configuration.
 
-Copy `config.example.yaml` to `config.yaml` and fill in admin QQ ids before running the bot.
+Copy `dora-bot.example.yaml` to `dora-bot.yaml` and fill in admin QQ ids before running the bot.
 
 Model configuration:
 
@@ -34,7 +34,7 @@ llm:
     model: deepseek-chat
 ```
 
-Keep API keys in environment variables, not in `config.yaml`:
+Keep API keys in environment variables, not in `dora-bot.yaml`:
 
 ```bash
 export DEEPSEEK_API_KEY='...'
@@ -67,10 +67,10 @@ With `enabled_group_ids: []`, every group is allowed. For production, fill expli
 Useful commands:
 
 ```bash
-uv run dora-bot --config config.yaml admin '/test ping' --user-id 123456
-uv run dora-bot --config config.yaml admin '/test classify Dora SSR Web IDE 无法刷新' --user-id 123456
-uv run dora-bot --config config.yaml admin '/test repo-check Dora-SSR' --user-id 123456
-uv run dora-bot --config config.yaml admin '/test daily-summary --dry-run' --user-id 123456
+uv run dora-bot --config dora-bot.yaml admin '/test ping' --user-id 123456
+uv run dora-bot --config dora-bot.yaml admin '/test classify Dora SSR Web IDE 无法刷新' --user-id 123456
+uv run dora-bot --config dora-bot.yaml admin '/test repo-check Dora-SSR' --user-id 123456
+uv run dora-bot --config dora-bot.yaml admin '/test daily-summary --dry-run' --user-id 123456
 ```
 
 The first implemented NcatBot surface is the admin test console. These commands only run in private chat with an admin account:

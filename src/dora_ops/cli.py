@@ -9,7 +9,7 @@ from .runtime import DoraOpsRuntime
 
 async def async_main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="dora-bot.yaml")
     sub = parser.add_subparsers(dest="command", required=True)
 
     admin = sub.add_parser("admin", help="Run an admin test command")

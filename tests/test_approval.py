@@ -40,7 +40,7 @@ repositories:
 
 @pytest.mark.asyncio
 async def test_approval_list_and_reject(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
     feedback_id = await runtime.storage.create_feedback(

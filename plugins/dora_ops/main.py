@@ -18,7 +18,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     version = "0.1.0"
 
     async def on_load(self) -> None:
-        self.runtime = await DoraOpsRuntime.create(Path("config.yaml"))
+        self.runtime = await DoraOpsRuntime.create(Path("dora-bot.yaml"))
         if hasattr(self, "add_scheduled_task"):
             self.add_scheduled_task(
                 "daily_progress_report",

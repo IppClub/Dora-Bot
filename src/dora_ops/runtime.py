@@ -23,7 +23,7 @@ class DoraOpsRuntime:
         self.group_chat = GroupMessageService(config, storage)
 
     @classmethod
-    async def create(cls, config_path: str | Path = "config.yaml") -> "DoraOpsRuntime":
+    async def create(cls, config_path: str | Path = "dora-bot.yaml") -> "DoraOpsRuntime":
         config_path = Path(config_path)
         base_dir = config_path.parent if config_path.parent != Path("") else Path.cwd()
         config = load_config(config_path)

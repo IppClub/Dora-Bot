@@ -87,10 +87,10 @@ def resolve_path(base_dir: Path, path: Path) -> Path:
     return path if path.is_absolute() else base_dir / path
 
 
-def load_config(path: str | Path = "config.yaml") -> BotConfig:
+def load_config(path: str | Path = "dora-bot.yaml") -> BotConfig:
     config_path = Path(path)
     if not config_path.exists():
-        example_path = config_path.with_name("config.example.yaml")
+        example_path = config_path.with_name("dora-bot.example.yaml")
         if example_path.exists():
             config_path = example_path
         else:

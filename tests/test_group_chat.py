@@ -41,7 +41,7 @@ repositories:
 
 @pytest.mark.asyncio
 async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
@@ -71,7 +71,7 @@ async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_group_ignores_unrelated_and_disabled_groups(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
@@ -88,7 +88,7 @@ async def test_group_ignores_unrelated_and_disabled_groups(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_group_alias_reply_without_recording_unrelated(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
@@ -103,7 +103,7 @@ async def test_group_alias_reply_without_recording_unrelated(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_group_ignores_test_commands(tmp_path: Path) -> None:
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
