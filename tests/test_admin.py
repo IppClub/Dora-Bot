@@ -182,16 +182,30 @@ async def test_admin_private_chat_fallback_allows_banter(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
-async def test_admin_private_chat_greeting_shows_capabilities(tmp_path: Path) -> None:
+async def test_admin_private_chat_greeting_falls_back_to_banter_without_llm(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
 
     result = await runtime.handle_admin_text("你好", user_id=123)
     assert result is not None
-    assert "你好" in result
-    assert "/test" in result
-    assert "/approve feedback <id>" in result
+    assert "可以啊" in result
+    assert "游戏引擎" in result
+
+
+@pytest.mark.asyncio
+async def test_admin_private_chat_greeting_uses_llm_when_enabled(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    fake = FakeChatClient()
+    runtime.admin.chat_client = fake  # type: ignore[assignment]
+
+    result = await runtime.handle_admin_text("你好", user_id=123)
+
+    assert result == "LLM 多轮回复"
+    assert len(fake.calls) == 1
+    assert fake.calls[0][-1] == {"role": "user", "content": "你好"}
 
 
 @pytest.mark.asyncio

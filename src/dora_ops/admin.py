@@ -203,10 +203,6 @@ class AdminCommands:
             return None
         conversation_key = self._private_conversation_key(user_id)
         await self.storage.append_chat_message(conversation_key, "user", normalized)
-        if self._is_greeting(normalized):
-            reply = "你好，我可以记录 Dora SSR 或 YueScript 的问题，也可以执行 /test、/approvals、/approve feedback <id> 等管理员命令。"
-            await self.storage.append_chat_message(conversation_key, "assistant", reply)
-            return reply
         classification = classify_text(normalized)
         side_effect_note = await self._record_private_chat_feedback(
             normalized,
