@@ -258,7 +258,7 @@ class AdminCommands:
         if not classification.should_accept:
             if classification.project:
                 return "看起来和项目有关，但信息还不够。请补充报错全文、平台、版本和最小复现。"
-            return "这条我先不归档。要记录 Dora SSR 或 YueScript 的问题，请把报错、平台和复现步骤一起发。"
+            return "可以啊。想聊游戏引擎、开源，还是单纯摸鱼？先说好，太无聊的话我会嫌弃两句。"
 
         if not classification.needs_repo_analysis:
             return f"收到，{side_effect_note or '已记录。'}"
