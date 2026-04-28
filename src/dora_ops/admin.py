@@ -233,6 +233,11 @@ class AdminCommands:
             user_id=user_id,
             classification=classification,
         )
+        if side_effect_note is not None and classification.kind == "project_question":
+            reply = self._fallback_private_chat_reply(classification, side_effect_note)
+            await self.storage.append_chat_message(conversation_key, "assistant", reply)
+            logger.info("admin private project question recorded without llm reply: user=%s reply_len=%s", user_id, len(reply))
+            return reply
         if self.config.llm.enabled and self.chat_client is not None:
             try:
                 reply = await self._llm_private_chat_reply(

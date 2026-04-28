@@ -191,7 +191,8 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert "# 能力触发规则" in system_prompt
     assert "报错、崩溃、无法、不能、失败" in system_prompt
     assert "追问报错全文、平台、版本、复现步骤" in system_prompt
-    assert "消息中明确 @多萝 或提及 Dora SSR 就一定要回复" in system_prompt
+    assert "不要直接解释；应记录为项目问题" in system_prompt
+    assert "消息中明确 @多萝 且不是 Dora SSR/YueScript/游戏引擎项目问题" in system_prompt
     assert "不需要回复时返回空字符串" in system_prompt
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "assistant"]
@@ -215,7 +216,7 @@ async def test_group_chat_llm_empty_response_stays_silent(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_group_chat_uses_llm_classifier_for_project_question(tmp_path: Path) -> None:
+async def test_group_chat_records_project_question_for_repo_analysis(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
@@ -238,12 +239,16 @@ async def test_group_chat_uses_llm_classifier_for_project_question(tmp_path: Pat
     )
 
     assert result is not None
-    assert result.reason == "llm_chat"
-    assert result.feedback_id is None
+    assert result.reason == "manual_required"
+    assert result.feedback_id is not None
+    assert result.approval_id is not None
     assert result.classification.kind == "project_question"
-    assert result.reply == "这个先看渲染状态切换和资源生命周期，别一上来就怀疑显卡。"
+    assert result.classification.needs_repo_analysis is True
+    assert result.reply is None
+    assert result.admin_notification is not None
+    assert "群聊反馈已记录：#" in result.admin_notification
     assert classifier.calls
-    assert chat.calls
+    assert chat.calls == []
 
 
 @pytest.mark.asyncio
@@ -301,10 +306,13 @@ async def test_group_buffered_messages_are_stored_separately(tmp_path: Path) -> 
     )
 
     assert result is not None
-    assert result.reply == "这个像资源生命周期没收好，先看释放点。"
+    assert result.reply is None
+    assert result.feedback_id is not None
+    assert result.approval_id is not None
+    assert result.admin_notification is not None
     assert classifier.calls
     assert "a: 多萝，Dora SSR 资源释放有问题" in classifier.calls[0][1]["content"]
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
-    assert [row["role"] for row in recent] == ["user", "user", "assistant"]
+    assert [row["role"] for row in recent] == ["user", "user"]
     assert "a：" in recent[0]["content"]
     assert "b：" in recent[1]["content"]

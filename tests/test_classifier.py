@@ -33,6 +33,14 @@ def test_classify_unrelated_chat() -> None:
     assert result.kind == "chat"
 
 
+def test_classify_project_question_routes_to_repo_analysis() -> None:
+    result = classify_text("Dora SSR 渲染管线怎么拆比较稳")
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.action == "record_feedback"
+    assert result.needs_repo_analysis is True
+
+
 async def test_llm_classifier_uses_function_calling() -> None:
     client = FakeToolClient()
 
@@ -40,6 +48,8 @@ async def test_llm_classifier_uses_function_calling() -> None:
 
     assert client.tool == CLASSIFY_MESSAGE_TOOL
     assert client.tool_name == "classify_message"
-    assert result.should_accept is False
+    assert result.should_accept is True
     assert result.kind == "project_question"
     assert result.project == "Dora-SSR"
+    assert result.action == "record_feedback"
+    assert result.needs_repo_analysis is True

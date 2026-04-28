@@ -55,7 +55,7 @@ CLASSIFY_MESSAGE_TOOL = {
             "properties": {
                 "should_accept": {
                     "type": "boolean",
-                    "description": "True only when the message should be recorded as a concrete Dora SSR/YueScript feedback item.",
+                    "description": "True when the message should be recorded for admin review, including concrete feedback and project questions.",
                 },
                 "kind": {
                     "type": "string",
@@ -122,7 +122,7 @@ def classify_text(text: str) -> Classification:
     if feedback_hits and project:
         return Classification(True, "feedback", "record_feedback", project, 0.82, True, text[:120])
     if project:
-        return Classification(False, "project_question", "answer_question", project, 0.66, False, text[:120])
+        return Classification(True, "project_question", "record_feedback", project, 0.66, True, text[:120])
     if feedback_hits:
         return Classification(False, "possible_feedback_unrelated", "ignore", None, 0.45, False, text[:120])
     return Classification(False, "chat", "ignore", None, 0.25, False, text[:120])
@@ -144,11 +144,12 @@ async def classify_text_with_llm(
                     "content": (
                         "你是 Dora Bot 的消息判断器，必须调用 classify_message 工具，不要用正文回答。\n"
                         "判断用户消息是否需要解释技术问题、是否应记录为 Dora SSR/YueScript 的有效反馈、是否需要仓库分析。\n"
-                        "should_accept 表示是否应该记录为有效反馈，不表示是否需要回复。"
-                        "解释类技术问题请用 kind=project_question 且 should_accept=false；"
-                        "只有明确问题、报错、建议、需求或可跟踪事项才 should_accept=true。"
-                        "action 表示群聊行为：普通聊天和不明确内容用 ignore；明确需要回答的问题用 answer_question；"
-                        "明确点名闲聊可用 reply；有效反馈用 record_feedback。"
+                        "should_accept 表示是否应该记录并交给管理员处理，不表示是否需要回复。"
+                        "Dora SSR/YueScript/游戏引擎相关技术问题请用 kind=project_question，"
+                        "并设置 should_accept=true、needs_repo_analysis=true、action=record_feedback；不要直接回答。"
+                        "只有普通闲聊和不明确内容才用 should_accept=false。"
+                        "action 表示群聊行为：普通聊天和不明确内容用 ignore；明确点名闲聊可用 reply；"
+                        "有效反馈和项目问题用 record_feedback。"
                     ),
                 },
                 {
@@ -183,7 +184,11 @@ def _classification_from_mapping(value: dict[str, Any], *, original_text: str) -
         confidence = 0.5
     confidence = max(0.0, min(confidence, 1.0))
     summary = str(value.get("summary") or original_text[:120])[:120]
-    if should_accept:
+    if kind == "project_question" and project is not None:
+        should_accept = True
+        needs_repo_analysis = True
+        action = "record_feedback"
+    elif should_accept:
         kind = "feedback"
         action = "record_feedback"
     return Classification(should_accept, kind, action, project, confidence, needs_repo_analysis, summary)
@@ -193,5 +198,5 @@ def _default_action(kind: str, *, should_accept: bool) -> str:
     if should_accept or kind == "feedback":
         return "record_feedback"
     if kind == "project_question":
-        return "answer_question"
+        return "record_feedback"
     return "ignore"

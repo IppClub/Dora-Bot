@@ -433,7 +433,7 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
     fake = FakeChatClient()
     runtime.admin.chat_client = fake  # type: ignore[assignment]
 
-    first = await runtime.handle_admin_text("Dora SSR Web IDE 无法刷新", user_id=123)
+    first = await runtime.handle_admin_text("你好", user_id=123)
     assert first == "LLM 多轮回复"
     second = await runtime.handle_admin_text("继续说明一下", user_id=123)
     assert second == "LLM 多轮回复"
@@ -481,6 +481,37 @@ async def test_admin_private_chat_uses_llm_classifier_for_feedback(tmp_path: Pat
     assert feedback is not None
     assert feedback["project"] == "Dora-SSR"
     assert feedback["kind"] == "feedback"
+    approval = await runtime.storage.get_pending_approval("feedback", 1)
+    assert approval is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_private_project_question_records_without_llm_reply(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient("不应该直接回答")
+    runtime.admin.chat_client = chat  # type: ignore[assignment]
+    runtime.admin.classifier_client = FakeClassifierClient(
+        {
+            "should_accept": False,
+            "kind": "project_question",
+            "project": "Dora-SSR",
+            "confidence": 0.91,
+            "needs_repo_analysis": False,
+            "summary": "询问渲染管线拆分",
+        }
+    )  # type: ignore[assignment]
+
+    result = await runtime.handle_admin_text("Dora SSR 渲染管线怎么拆比较稳", user_id=123)
+
+    assert result is not None
+    assert "已记录为 #1" in result
+    assert "/approve feedback 1" in result
+    assert chat.calls == []
+    feedback = await runtime.storage.get_feedback(1)
+    assert feedback is not None
+    assert feedback["kind"] == "project_question"
     approval = await runtime.storage.get_pending_approval("feedback", 1)
     assert approval is not None
 
