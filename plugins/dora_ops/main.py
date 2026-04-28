@@ -105,16 +105,45 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     def _extract_text(msg) -> str:
         chunks: list[str] = []
         for item in getattr(msg, "message", []) or []:
-            if item.get("type") == "text":
-                chunks.append(item.get("data", {}).get("text", ""))
+            if DoraOpsPlugin._segment_type(item) == "text":
+                chunks.append(DoraOpsPlugin._segment_text(item))
         return "".join(chunks)
 
     @staticmethod
     def _mentions_bot(msg) -> bool:
         for item in getattr(msg, "message", []) or []:
-            if item.get("type") == "at":
+            if DoraOpsPlugin._segment_type(item) == "at":
                 return True
         return False
+
+    @staticmethod
+    def _segment_type(item) -> str:
+        if isinstance(item, dict):
+            return str(item.get("type") or "")
+        value = getattr(item, "type", None) or getattr(item, "message_type", None)
+        if value is not None:
+            return str(value)
+        name = type(item).__name__.lower()
+        if "plain" in name or "text" in name:
+            return "text"
+        if name in {"at", "mention"} or "at" == name:
+            return "at"
+        return ""
+
+    @staticmethod
+    def _segment_text(item) -> str:
+        if isinstance(item, dict):
+            data = item.get("data", {})
+            if isinstance(data, dict):
+                return str(data.get("text") or "")
+            return ""
+        for attr in ("text", "content", "data"):
+            value = getattr(item, attr, None)
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                return str(value.get("text") or "")
+        return ""
 
     async def _send_group_reply(self, group_id: int, text: str, at_user_id: int | None = None) -> None:
         if at_user_id is not None:

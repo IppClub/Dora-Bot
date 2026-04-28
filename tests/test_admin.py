@@ -78,6 +78,15 @@ class FakeClassifierClient:
         return self.result
 
 
+class FakePlainText:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class FakeAt:
+    type = "at"
+
+
 @pytest.mark.asyncio
 async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -108,6 +117,13 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
     result = await runtime.handle_admin_text("/test daily-summary --progress", user_id=123)
     assert result is not None
     assert "缺少" in result
+
+
+def test_plugin_message_segments_support_ncatbot_objects() -> None:
+    msg = SimpleNamespace(message=[FakePlainText("准备 "), FakePlainText("尝试一种模式"), FakeAt()])
+
+    assert DoraOpsPlugin._extract_text(msg) == "准备 尝试一种模式"
+    assert DoraOpsPlugin._mentions_bot(msg) is True
 
 
 @pytest.mark.asyncio
