@@ -279,6 +279,25 @@ def test_daily_summary_group_ids_fall_back_to_enabled_group_chat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_daily_progress_group_send_records_chat_history(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    runtime.config.scheduler.daily_summary_group_ids.add(456)
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = runtime
+
+    await plugin._send_daily_progress_result_to_groups("昨日进展分析结果：完成")
+
+    assert qq.group_messages == [(456, {"text": "昨日进展分析结果：完成"})]
+    recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
+    assert [message["role"] for message in recent] == ["assistant"]
+    assert recent[0]["content"] == "昨日进展分析结果：完成"
+
+
+@pytest.mark.asyncio
 async def test_progress_results_send_raw_output_to_llm_summary(tmp_path: Path) -> None:
     output = tmp_path / "output.json"
     output.write_text(
@@ -415,6 +434,9 @@ async def test_feedback_analysis_watcher_replies_to_group_requester(tmp_path: Pa
     await plugin._watch_feedback_analysis_job(job_id, 456, 789)
 
     assert qq.group_messages == [(456, {"text": "分析完成：{\"summary\":\"分析完成\"}", "at": 789})]
+    recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
+    assert [message["role"] for message in recent] == ["assistant"]
+    assert recent[0]["content"] == "分析完成：{\"summary\":\"分析完成\"}"
     delivery = await runtime.storage.get_analysis_delivery(job_id)
     assert delivery is None
 
@@ -726,3 +748,50 @@ async def test_job_status_marks_missing_done_finished_tmux_as_failed(tmp_path: P
     assert result is not None
     assert "daily_progress failed" in result
     assert "tmux session ended before writing job completion marker" in result
+
+
+@pytest.mark.asyncio
+async def test_job_status_shows_five_job_window_with_offset(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    for index in range(12):
+        job_dir = tmp_path / f"job-{index}"
+        job_dir.mkdir()
+        prompt = job_dir / "prompt.md"
+        output = job_dir / "output.json"
+        error = job_dir / "error.log"
+        exit_code = job_dir / "exit_code"
+        done = job_dir / "done"
+        prompt.write_text("prompt", encoding="utf-8")
+        output.write_text("", encoding="utf-8")
+        error.write_text("", encoding="utf-8")
+        exit_code.write_text("", encoding="utf-8")
+        await runtime.storage.create_job(
+            kind=f"job_{index}",
+            target_type="repository",
+            target_id=None,
+            tmux_session=f"session_{index}",
+            prompt_path=prompt,
+            output_path=output,
+            error_path=error,
+            exit_code_path=exit_code,
+            done_path=done,
+            is_test=True,
+            triggered_by="123",
+            trigger_source="admin_command",
+        )
+
+    result = await runtime.handle_admin_text("/test job-status --include-test", user_id=123)
+    assert result is not None
+    assert "#12 job_11" in result
+    assert "#8 job_7" in result
+    assert "#7 job_6" not in result
+
+    result = await runtime.handle_admin_text("/test job-status --include-test --offset 5", user_id=123)
+    assert result is not None
+    assert "#7 job_6" in result
+    assert "#3 job_2" in result
+    assert "#8 job_7" not in result
+    assert "#2 job_1" not in result

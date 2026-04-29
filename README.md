@@ -143,6 +143,25 @@ NcatBot startup:
 ./scripts/stop.sh
 ```
 
+`scripts/start.sh` runs the Dora Bot / NcatBot process in a tmux watchdog loop.
+If NcatBot exits, it is started again after 10 seconds. Runtime logs are written
+to `logs/ncatbot.log`.
+
+NapCat/QQ may be deployed in a separate environment. Native QQ crash logs such as
+`UploadBugly` or `rqd_record.eup` must be handled on the NapCat side. The
+`scripts/napcat-watchdog.sh` helper can be copied to that environment to monitor
+the NapCat WebSocket and run a restart command when it becomes unhealthy:
+
+```bash
+export NAPCAT_WS_URL='ws://127.0.0.1:3001'
+export NAPCAT_WS_TOKEN='napcat_ws'
+export NAPCAT_RESTART_CMD='napcat restart'
+./scripts/napcat-watchdog.sh
+```
+
+Adjust `NAPCAT_RESTART_CMD` to match the actual NapCat deployment, for example a
+systemd restart, Docker restart, or local `napcat stop && napcat start <qq>`.
+
 The underlying command is:
 
 ```bash

@@ -314,6 +314,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     async def _send_daily_progress_result_to_groups(self, text: str) -> None:
         for group_id in self._daily_summary_group_ids():
             await self._send_group_reply(group_id, text)
+            await self._record_group_assistant_message(group_id, text)
+
+    async def _record_group_assistant_message(self, group_id: int, text: str) -> None:
+        await self.runtime.storage.append_chat_message(f"group:{group_id}", "assistant", text)
 
     async def _watch_feedback_analysis_job(self, job_id: int, group_id: int, user_id: int) -> None:
         deadline = asyncio.get_running_loop().time() + self.runtime.config.jobs.max_runtime_seconds + 30
@@ -327,6 +331,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             if job is not None and status in terminal:
                 text = await self._format_feedback_analysis_result(job)
                 await self._send_group_reply(group_id, text, at_user_id=user_id or None)
+                await self._record_group_assistant_message(group_id, text)
                 await self.runtime.storage.mark_analysis_delivered(job_id)
                 return
             if asyncio.get_running_loop().time() >= deadline:
@@ -334,6 +339,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 job = await self.runtime.storage.get_job(job_id)
                 text = await self._format_feedback_analysis_result(job or {"id": job_id, "status": JobStatus.TIMEOUT.value, "error": "feedback analysis watcher timed out"})
                 await self._send_group_reply(group_id, text, at_user_id=user_id or None)
+                await self._record_group_assistant_message(group_id, text)
                 await self.runtime.storage.mark_analysis_delivered(job_id)
                 return
             await asyncio.sleep(5)

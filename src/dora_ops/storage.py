@@ -299,14 +299,14 @@ class Storage:
             )
             await db.commit()
 
-    async def list_recent_jobs(self, limit: int = 10, include_test: bool = False) -> list[dict[str, Any]]:
+    async def list_recent_jobs(self, limit: int = 10, include_test: bool = False, offset: int = 0) -> list[dict[str, Any]]:
         where = "" if include_test else "where is_test = 0"
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             rows = await (
                 await db.execute(
-                    f"select * from analysis_job {where} order by id desc limit ?",
-                    (limit,),
+                    f"select * from analysis_job {where} order by id desc limit ? offset ?",
+                    (limit, offset),
                 )
             ).fetchall()
             return [dict(row) for row in rows]

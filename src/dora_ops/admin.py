@@ -29,6 +29,7 @@ REPO_ALIASES = {
     "yue": "yuescript",
 }
 logger = get_log("DoraOps.Admin") if get_log is not None else logging.getLogger(__name__)
+JOB_STATUS_WINDOW = 5
 
 
 class AdminCommands:
@@ -170,10 +171,22 @@ class AdminCommands:
 
         if command == "job-status":
             include_test = "--include-test" in arg
-            jobs = await self.storage.list_recent_jobs(include_test=include_test)
+            try:
+                offset = self._parse_job_status_offset(arg)
+            except ValueError as exc:
+                return str(exc)
+            jobs = await self.storage.list_recent_jobs(
+                limit=JOB_STATUS_WINDOW,
+                include_test=include_test,
+                offset=offset,
+            )
             for job in jobs:
                 await self.jobs.reconcile_job(job)
-            jobs = await self.storage.list_recent_jobs(include_test=include_test)
+            jobs = await self.storage.list_recent_jobs(
+                limit=JOB_STATUS_WINDOW,
+                include_test=include_test,
+                offset=offset,
+            )
             if not jobs:
                 return "没有任务记录。"
             return "\n".join(self._job_status_text(job) for job in jobs)
@@ -197,7 +210,7 @@ class AdminCommands:
                 "/test opencode Dora-SSR|YueScript",
                 "/test daily-summary --dry-run",
                 "/test daily-summary --progress",
-                "/test job-status --include-test",
+                "/test job-status --include-test [--offset 5]",
                 "/approvals",
                 "/approve feedback <id>",
                 "/reject feedback <id>",
@@ -384,6 +397,25 @@ class AdminCommands:
         if result.admin_notification:
             lines.append(f"管理员通知：{result.admin_notification}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _parse_job_status_offset(arg: str) -> int:
+        parts = arg.split()
+        for index, part in enumerate(parts):
+            value = None
+            if part == "--offset":
+                if index + 1 >= len(parts):
+                    raise ValueError("格式错误：/test job-status [--include-test] [--offset <数量>]")
+                value = parts[index + 1]
+            elif part.startswith("--offset="):
+                value = part.removeprefix("--offset=")
+            elif part.startswith("offset="):
+                value = part.removeprefix("offset=")
+            if value is not None:
+                if not value.isdigit():
+                    raise ValueError("offset 必须是非负整数。")
+                return int(value)
+        return 0
 
     @staticmethod
     def _job_status_text(job: dict[str, object]) -> str:

@@ -26,7 +26,7 @@ if [[ ! -f dora-bot.yaml ]]; then
 fi
 
 tmux new-session -d -s "$SESSION_NAME" \
-  "cd '$ROOT_DIR' && uv run ncatbot run --plugins-dir plugins --non-interactive 2>&1 | tee -a '$LOG_FILE'"
+  "cd '$ROOT_DIR' && while true; do echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] starting ncatbot\"; uv run ncatbot run --plugins-dir plugins --non-interactive; status=\$?; echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] ncatbot exited with status \$status; restarting in 10s\"; sleep 10; done 2>&1 | tee -a '$LOG_FILE'"
 
 echo "Dora bot started."
 echo "tmux session: $SESSION_NAME"
