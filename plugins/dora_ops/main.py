@@ -59,11 +59,21 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             )
 
     async def daily_progress_report(self) -> None:
-        created = await self.runtime.summaries.create_yesterday_progress_jobs(self.runtime.jobs)
+        try:
+            created = await self.runtime.summaries.create_yesterday_progress_jobs(self.runtime.jobs)
+        except Exception:
+            logger.exception("daily progress report failed to create jobs")
+            return
         job_ids = [job_id for _, job_id in created]
         group_ids = self._daily_summary_group_ids()
-        if job_ids and group_ids:
-            asyncio.create_task(self._watch_progress_jobs(job_ids, self._send_daily_progress_result_to_groups))
+        logger.info("daily progress report jobs created: jobs=%s groups=%s", job_ids, group_ids)
+        if not job_ids:
+            logger.info("daily progress report skipped: no jobs created")
+            return
+        if not group_ids:
+            logger.info("daily progress report skipped: no target groups configured")
+            return
+        await self._watch_progress_jobs(job_ids, self._send_daily_progress_result_to_groups)
 
     if registrar is not None:
 

@@ -237,7 +237,7 @@ async def test_plugin_sends_group_feedback_notifications_to_admins() -> None:
 
 
 @pytest.mark.asyncio
-async def test_daily_progress_report_watches_configured_groups(monkeypatch) -> None:
+async def test_daily_progress_report_watches_configured_groups() -> None:
     class FakeSummaries:
         async def create_yesterday_progress_jobs(self, jobs):
             assert jobs == "jobs"
@@ -252,18 +252,15 @@ async def test_daily_progress_report_watches_configured_groups(monkeypatch) -> N
             group_chat=SimpleNamespace(enabled_group_ids={789}),
         ),
     )
+    watched = []
 
-    created_tasks = []
+    async def fake_watch_progress_jobs(job_ids, send):
+        watched.append((job_ids, send))
 
-    def fake_create_task(coro):
-        created_tasks.append(coro)
-        coro.close()
-        return object()
-
-    monkeypatch.setattr(plugin_module.asyncio, "create_task", fake_create_task)
+    plugin._watch_progress_jobs = fake_watch_progress_jobs
     await plugin.daily_progress_report()
 
-    assert len(created_tasks) == 1
+    assert watched == [([1, 2], plugin._send_daily_progress_result_to_groups)]
 
 
 def test_daily_summary_group_ids_fall_back_to_enabled_group_chat() -> None:
