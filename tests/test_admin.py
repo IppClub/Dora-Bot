@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from dora_ops.admin import AdminCommands
 from dora_ops.models import JobStatus
 from dora_ops.runtime import DoraOpsRuntime
 
@@ -79,6 +80,11 @@ class FakeClassifierClient:
         assert tool_name == "classify_message"
         self.calls.append(messages)
         return self.result
+
+
+def test_admin_project_route_prefers_dora_ssr_for_combined_project() -> None:
+    assert AdminCommands._repo_key_for_project("Dora-SSR/YueScript") == "dora_ssr"
+    assert AdminCommands._repo_key_for_project("YueScript") == "yuescript"
 
 
 class FakePlainText:

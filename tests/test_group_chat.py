@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from dora_ops.group_chat import GroupBufferedMessage, GroupMessageInput
+from dora_ops.group_chat import GroupBufferedMessage, GroupMessageInput, GroupMessageService
 from dora_ops.runtime import DoraOpsRuntime
 
 
@@ -71,6 +71,11 @@ class FakeClassifierClient:
         assert tool_name == "classify_message"
         self.calls.append(messages)
         return self.result
+
+
+def test_group_project_route_prefers_dora_ssr_for_combined_project() -> None:
+    assert GroupMessageService._repo_key_for_project("Dora-SSR/YueScript") == "dora_ssr"
+    assert GroupMessageService._repo_key_for_project("YueScript") == "yuescript"
 
 
 @pytest.mark.asyncio

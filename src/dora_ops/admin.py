@@ -486,10 +486,11 @@ class AdminCommands:
 
     @staticmethod
     def _repo_key_for_project(project: object) -> str:
-        text = str(project or "").lower()
-        if "yue" in text:
-            return "yuescript"
-        return "dora_ssr"
+        return {
+            "Dora-SSR": "dora_ssr",
+            "YueScript": "yuescript",
+            "Dora-SSR/YueScript": "dora_ssr",
+        }.get(str(project or "").strip(), "dora_ssr")
 
     @staticmethod
     def _repo_key(value: str) -> str:
