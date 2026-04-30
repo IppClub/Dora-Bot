@@ -317,6 +317,23 @@ class Storage:
             row = await (await db.execute("select * from analysis_job where id=?", (job_id,))).fetchone()
             return dict(row) if row else None
 
+    async def list_jobs_by_status(self, status: JobStatus, *, kind: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        where = "where status=?"
+        params: list[Any] = [status.value]
+        if kind is not None:
+            where += " and kind=?"
+            params.append(kind)
+        params.append(limit)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (
+                await db.execute(
+                    f"select * from analysis_job {where} order by id asc limit ?",
+                    params,
+                )
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     async def count_jobs(self, *, kind: str, since_ts: int, include_test: bool = False) -> int:
         test_filter = "" if include_test else "and is_test = 0"
         async with aiosqlite.connect(self.db_path) as db:
@@ -506,6 +523,22 @@ class Storage:
             db.row_factory = aiosqlite.Row
             row = await (await db.execute("select * from analysis_delivery where job_id=?", (job_id,))).fetchone()
             return dict(row) if row else None
+
+    async def list_pending_analysis_deliveries(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (
+                await db.execute(
+                    """
+                    select * from analysis_delivery
+                    where delivered_at is null and group_id is not null
+                    order by job_id asc
+                    limit ?
+                    """,
+                    (limit,),
+                )
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     async def mark_analysis_delivered(self, job_id: int) -> None:
         async with aiosqlite.connect(self.db_path) as db:

@@ -57,6 +57,46 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 self.runtime.config.scheduler.daily_summary_time,
                 callback=self.daily_progress_report,
             )
+        asyncio.create_task(self._recover_feedback_analysis_jobs())
+
+    async def _recover_feedback_analysis_jobs(self) -> None:
+        queued = await self.runtime.storage.list_jobs_by_status(
+            JobStatus.QUEUED,
+            kind="feedback_analysis",
+        )
+        for job in queued:
+            repo_key = self._repo_key_from_feedback_session(str(job.get("tmux_session") or ""))
+            if repo_key is None:
+                logger.warning("skip queued feedback job with unrecognized session: job=%s session=%s", job.get("id"), job.get("tmux_session"))
+                continue
+            repo = self.runtime.config.repositories.get(repo_key)
+            if repo is None:
+                logger.warning("skip queued feedback job with unknown repo: job=%s repo=%s", job.get("id"), repo_key)
+                continue
+            try:
+                mirror = await self.runtime.tracker.ensure_mirror(repo_key, repo)
+                await self.runtime.jobs.resume_queued_feedback_analysis(job, mirror)
+                logger.info("recovered queued feedback analysis job: job=%s repo=%s", job.get("id"), repo_key)
+            except Exception:
+                logger.exception("failed to recover queued feedback analysis job: job=%s", job.get("id"))
+        deliveries = await self.runtime.storage.list_pending_analysis_deliveries()
+        for delivery in deliveries:
+            asyncio.create_task(self._watch_deliverable_feedback_analysis_job(int(delivery["job_id"])))
+
+    @staticmethod
+    def _repo_key_from_feedback_session(session: str) -> str | None:
+        prefix = "dora_job_"
+        marker = "_feedback_"
+        if not session.startswith(prefix):
+            return None
+        rest = session[len(prefix) :]
+        _, sep, tail = rest.partition("_")
+        if not sep:
+            return None
+        repo_key, sep, feedback_id = tail.partition(marker)
+        if not sep or not repo_key or not feedback_id.isdigit():
+            return None
+        return repo_key
 
     async def daily_progress_report(self) -> None:
         try:

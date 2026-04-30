@@ -87,6 +87,12 @@ def test_admin_project_route_prefers_dora_ssr_for_combined_project() -> None:
     assert AdminCommands._repo_key_for_project("YueScript") == "yuescript"
 
 
+def test_feedback_session_repo_key_parser_allows_underscored_repo_key() -> None:
+    assert DoraOpsPlugin._repo_key_from_feedback_session("dora_job_1777477435_dora_ssr_feedback_46") == "dora_ssr"
+    assert DoraOpsPlugin._repo_key_from_feedback_session("dora_job_1777477435_yuescript_feedback_47") == "yuescript"
+    assert DoraOpsPlugin._repo_key_from_feedback_session("invalid") is None
+
+
 class FakePlainText:
     def __init__(self, text: str):
         self.text = text

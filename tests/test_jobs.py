@@ -54,3 +54,57 @@ async def test_feedback_analysis_jobs_run_serially(tmp_path: Path) -> None:
             break
         await asyncio.sleep(0.01)
     assert events == [("start", first), ("end", first), ("start", second), ("end", second)]
+
+
+@pytest.mark.asyncio
+async def test_queued_feedback_analysis_can_resume_after_restart(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    prompt = job_dir / "prompt.md"
+    output = job_dir / "output.json"
+    error = job_dir / "error.log"
+    exit_code = job_dir / "exit_code"
+    done = job_dir / "done"
+    prompt.write_text("prompt", encoding="utf-8")
+
+    job_id = await runtime.storage.create_job(
+        kind="feedback_analysis",
+        target_type="feedback",
+        target_id=46,
+        tmux_session="dora_job_1777477435_dora_ssr_feedback_46",
+        prompt_path=prompt,
+        output_path=output,
+        error_path=error,
+        exit_code_path=exit_code,
+        done_path=done,
+    )
+    started: list[int] = []
+
+    async def fake_start(job_id, session, command, error_path, exit_code_path, done_path):
+        started.append(job_id)
+        assert "opencode" in command
+        await runtime.storage.update_job_status(job_id, JobStatus.RUNNING)
+        output.write_text('{"summary":"ok"}', encoding="utf-8")
+        error_path.write_text("", encoding="utf-8")
+        exit_code_path.write_text("0", encoding="utf-8")
+        done_path.touch()
+
+    runtime.jobs._start_tmux_job = fake_start  # type: ignore[method-assign]
+    job = await runtime.storage.get_job(job_id)
+    assert job is not None
+
+    await runtime.jobs.resume_queued_feedback_analysis(job, tmp_path)
+
+    for _ in range(20):
+        resumed = await runtime.storage.get_job(job_id)
+        if resumed and resumed["status"] == JobStatus.SUCCEEDED.value:
+            break
+        await asyncio.sleep(0.01)
+
+    resumed = await runtime.storage.get_job(job_id)
+    assert resumed is not None
+    assert resumed["status"] == JobStatus.SUCCEEDED.value
+    assert started == [job_id]

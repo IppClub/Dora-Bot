@@ -120,6 +120,22 @@ class JobManager:
         asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
         return job_id
 
+    async def resume_queued_feedback_analysis(self, job: dict[str, object], repo_path: Path) -> None:
+        job_id = int(job["id"])
+        if str(job.get("kind") or "") != "feedback_analysis":
+            raise ValueError(f"job #{job_id} is not a feedback analysis job")
+        if str(job.get("status") or "") != JobStatus.QUEUED.value:
+            return
+        prompt = Path(str(job["prompt_path"]))
+        output = Path(str(job["output_path"]))
+        error = Path(str(job["error_path"]))
+        exit_code = Path(str(job["exit_code_path"]))
+        done = Path(str(job["done_path"]))
+        session = str(job["tmux_session"])
+        opencode = self.config.jobs.opencode_command
+        command = f"cd {shlex.quote(str(repo_path))} && {opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
+
     async def create_yesterday_progress_analysis(
         self,
         repo_key: str,
