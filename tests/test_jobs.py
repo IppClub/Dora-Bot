@@ -22,12 +22,6 @@ repositories:
     watch_paths: []
 """
 
-TIMEOUT_CONFIG = CONFIG + """
-jobs:
-  max_runtime_seconds: 0
-"""
-
-
 @pytest.mark.asyncio
 async def test_feedback_analysis_jobs_run_serially(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
@@ -116,12 +110,11 @@ async def test_queued_feedback_analysis_can_resume_after_restart(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_stuck_feedback_analysis_times_out_and_releases_serial_queue(tmp_path: Path) -> None:
+async def test_missing_tmux_feedback_analysis_fails_and_releases_serial_queue(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
-    config_path.write_text(TIMEOUT_CONFIG, encoding="utf-8")
+    config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
     started: list[int] = []
-    killed: list[str] = []
 
     async def fake_start(job_id, session, command, error_path, exit_code_path, done_path):
         started.append(job_id)
@@ -133,15 +126,11 @@ async def test_stuck_feedback_analysis_times_out_and_releases_serial_queue(tmp_p
             exit_code_path.write_text("0", encoding="utf-8")
             done_path.touch()
 
-    async def fake_tmux_session_exists(_session: str) -> bool:
-        return True
-
-    async def fake_kill(session: str) -> None:
-        killed.append(session)
+    async def fake_tmux_session_exists(session: str) -> bool:
+        return not session.endswith("_feedback_1")
 
     runtime.jobs._start_tmux_job = fake_start  # type: ignore[method-assign]
     runtime.jobs._tmux_session_exists = fake_tmux_session_exists  # type: ignore[method-assign]
-    runtime.jobs._kill_tmux_session = fake_kill  # type: ignore[method-assign]
 
     first = await runtime.jobs.create_feedback_analysis("dora_ssr", tmp_path, 1, "prompt")
     second = await runtime.jobs.create_feedback_analysis("dora_ssr", tmp_path, 2, "prompt")
@@ -152,7 +141,7 @@ async def test_stuck_feedback_analysis_times_out_and_releases_serial_queue(tmp_p
         if (
             first_job
             and second_job
-            and first_job["status"] == JobStatus.TIMEOUT.value
+            and first_job["status"] == JobStatus.FAILED.value
             and second_job["status"] == JobStatus.SUCCEEDED.value
         ):
             break
@@ -162,7 +151,7 @@ async def test_stuck_feedback_analysis_times_out_and_releases_serial_queue(tmp_p
     second_job = await runtime.storage.get_job(second)
     assert first_job is not None
     assert second_job is not None
-    assert first_job["status"] == JobStatus.TIMEOUT.value
+    assert first_job["status"] == JobStatus.FAILED.value
+    assert first_job["error"] == "tmux session ended before writing job completion marker"
     assert second_job["status"] == JobStatus.SUCCEEDED.value
     assert started == [first, second]
-    assert len(killed) == 1
