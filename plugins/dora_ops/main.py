@@ -347,9 +347,13 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     async def _send_group_reply(self, group_id: int, text: str, at_user_id: int | None = None) -> None:
         if at_user_id is not None:
-            await self.api.qq.post_group_msg(group_id, text=text, at=at_user_id)
+            await self.api.qq.post_group_msg(group_id, text=self._text_after_at(text), at=at_user_id)
             return
         await self.api.qq.post_group_msg(group_id, text=text)
+
+    @staticmethod
+    def _text_after_at(text: str) -> str:
+        return text if text.startswith((" ", "\n")) else f" {text}"
 
     async def _send_admin_notifications(self, text: str) -> None:
         for user_id in sorted(self.runtime.config.admin.user_ids):

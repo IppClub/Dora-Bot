@@ -211,7 +211,7 @@ async def test_plugin_sends_messages_through_ncatbot_qq_api() -> None:
     await plugin._send_group_reply(456, "群聊", at_user_id=789)
 
     assert qq.private_messages == [(123, {"text": "私聊"})]
-    assert qq.group_messages == [(456, {"text": "群聊", "at": 789})]
+    assert qq.group_messages == [(456, {"text": " 群聊", "at": 789})]
 
 
 @pytest.mark.asyncio
@@ -442,7 +442,7 @@ async def test_feedback_analysis_watcher_replies_to_group_requester(tmp_path: Pa
 
     await plugin._watch_feedback_analysis_job(job_id, 456, 789)
 
-    assert qq.group_messages == [(456, {"text": "分析完成：{\"summary\":\"分析完成\"}", "at": 789})]
+    assert qq.group_messages == [(456, {"text": " 分析完成：{\"summary\":\"分析完成\"}", "at": 789})]
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [message["role"] for message in recent] == ["assistant"]
     assert recent[0]["content"] == "分析完成：{\"summary\":\"分析完成\"}"
