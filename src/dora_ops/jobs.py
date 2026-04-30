@@ -274,14 +274,47 @@ class JobManager:
     ) -> None:
         async with self._analysis_queue_lock:
             try:
+                current = await self.storage.get_job(job_id)
+                if current is None or str(current.get("status") or "") != JobStatus.QUEUED.value:
+                    return
                 await self._start_tmux_job(job_id, session, command, error_path, exit_code_path, done_path)
+                deadline = time.monotonic() + self.config.jobs.max_runtime_seconds
                 while not done_path.exists():
+                    job = await self.storage.get_job(job_id)
+                    if job is None:
+                        return
+                    status = str(job.get("status") or "")
+                    if status in {JobStatus.SUCCEEDED.value, JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
+                        return
+                    reconciled = await self.reconcile_job(job)
+                    if reconciled is not None:
+                        return
+                    if time.monotonic() >= deadline:
+                        await self._kill_tmux_session(session)
+                        await self.storage.update_job_status(
+                            job_id,
+                            JobStatus.TIMEOUT,
+                            "feedback analysis job timed out",
+                        )
+                        return
                     await asyncio.sleep(5)
                 job = await self.storage.get_job(job_id)
                 if job is not None:
                     await self.reconcile_job(job)
             except Exception as exc:
                 await self.storage.update_job_status(job_id, JobStatus.FAILED, str(exc))
+
+    @staticmethod
+    async def _kill_tmux_session(session: str) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux",
+            "kill-session",
+            "-t",
+            session,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
 
     @staticmethod
     async def _tmux_session_exists(session: str) -> bool:
