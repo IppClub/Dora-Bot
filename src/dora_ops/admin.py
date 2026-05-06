@@ -4,7 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from .classifier import classify_text, classify_text_with_llm
+from .analysis_planner import AnalysisPlan, plan_feedback_analysis_with_llm
+from .classifier import Classification, classify_text, classify_text_with_llm
 from .config import BotConfig
 from .group_chat import DORA_PERSONA_PROMPT, GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
@@ -45,6 +46,7 @@ class AdminCommands:
         group_chat: GroupMessageService,
         chat_client: OpenAICompatibleChatClient | None = None,
         classifier_client: OpenAICompatibleChatClient | None = None,
+        planner_client: OpenAICompatibleChatClient | None = None,
     ):
         self.base_dir = base_dir
         self.config = config
@@ -56,6 +58,7 @@ class AdminCommands:
         self.welcome = WelcomeService(config)
         self.chat_client = chat_client
         self.classifier_client = classifier_client
+        self.planner_client = planner_client
 
     def is_admin(self, user_id: int, group_id: int | None = None) -> bool:
         if user_id in self.config.admin.user_ids:
@@ -487,15 +490,34 @@ class AdminCommands:
         if feedback is None:
             return f"反馈不存在：#{target_id}"
 
-        repo_key = self._repo_key_for_project(feedback.get("project"))
+        classification = Classification(
+            should_accept=True,
+            kind=str(feedback.get("kind") or "feedback"),
+            action="record_feedback",
+            project=str(feedback["project"]) if feedback.get("project") is not None else None,
+            confidence=0.5,
+            needs_repo_analysis=True,
+            summary=str(feedback.get("normalized_summary") or feedback.get("title") or feedback.get("original_text") or "")[:120],
+        )
+        plan = await self._plan_feedback_analysis(feedback=feedback, classification=classification)
+        if not plan.should_create_analysis:
+            note = plan.reject_reason or "二次规划认为不需要仓库分析"
+            await self.storage.decide_approval(int(approval["id"]), "rejected", decided_by=user_id, note=note[:200])
+            questions = "\n".join(f"- {item}" for item in plan.questions_for_user)
+            suffix = f"\n建议追问：\n{questions}" if questions else ""
+            return f"已二次确认：不建议创建仓库分析任务。\n原因：{note}{suffix}"
+
+        repo_key = plan.repo_key or self._repo_key_for_project(feedback.get("project"))
         repo = self.config.repositories[repo_key]
         mirror = await self.tracker.ensure_mirror(repo_key, repo)
         prompt = feedback_analysis_prompt(
             repo_name=repo.name,
             project=feedback.get("project"),
             kind=feedback.get("kind"),
-            title=feedback.get("title"),
+            title=plan.title or feedback.get("title"),
             original_text=str(feedback.get("original_text") or ""),
+            analysis_task=plan.analysis_task,
+            context_summary=plan.context_summary,
         )
         job_id = await self.jobs.create_feedback_analysis(
             repo_key,
@@ -513,6 +535,24 @@ class AdminCommands:
             )
         await self.storage.decide_approval(int(approval["id"]), "approved", decided_by=user_id, note=f"job:{job_id}")
         return f"已批准反馈 #{target_id}，分析任务已创建：#{job_id}"
+
+    async def _plan_feedback_analysis(self, *, feedback: dict[str, object], classification) -> AnalysisPlan:
+        group_id = feedback.get("group_id")
+        context = ""
+        if group_id is not None:
+            rows = await self.storage.list_recent_chat_messages(
+                GroupMessageService._group_conversation_key(int(group_id)),
+                self.config.llm.max_context_messages,
+            )
+            context = "\n".join(f"{row['role']}: {row['content']}" for row in rows)
+        client = self.planner_client if self.config.llm.enabled else None
+        return await plan_feedback_analysis_with_llm(
+            client=client,
+            repositories={key: repo.name for key, repo in self.config.repositories.items()},
+            classification=classification,
+            original_text=str(feedback.get("original_text") or ""),
+            recent_context=context,
+        )
 
     @staticmethod
     def _parse_decision_command(text: str, prefix: str) -> tuple[str, int]:

@@ -49,6 +49,8 @@ def feedback_analysis_prompt(
     kind: str | None,
     title: str | None,
     original_text: str,
+    analysis_task: str | None = None,
+    context_summary: str | None = None,
 ) -> str:
     return f"""You are analyzing a community feedback item for {repo_name}.
 
@@ -58,6 +60,16 @@ Feedback metadata:
 - project: {project or repo_name}
 - kind: {kind or "unknown"}
 - title: {title or ""}
+
+Analysis task:
+```text
+{(analysis_task or title or original_text)[:12000]}
+```
+
+Conversation-derived context summary:
+```text
+{(context_summary or "No additional summarized context.")[:4000]}
+```
 
 Original user message:
 ```text

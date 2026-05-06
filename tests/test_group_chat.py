@@ -73,6 +73,17 @@ class FakeClassifierClient:
         return self.result
 
 
+class FakePlannerClient:
+    def __init__(self, result: dict[str, object]):
+        self.result = result
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def complete_tool_call(self, messages, *, tool, tool_name):
+        assert tool_name == "plan_feedback_analysis"
+        self.calls.append(messages)
+        return self.result
+
+
 def test_group_project_route_prefers_dora_ssr_for_combined_project() -> None:
     assert GroupMessageService._repo_key_for_project("Dora-SSR/YueScript") == "dora_ssr"
     assert GroupMessageService._repo_key_for_project("YueScript") == "yuescript"
@@ -182,6 +193,105 @@ async def test_group_feedback_falls_back_to_approval_after_daily_auto_limit(tmp_
     assert result.approval_id is not None
     assert result.admin_notification is not None
     assert "/approve feedback" in result.admin_notification
+
+
+@pytest.mark.asyncio
+async def test_group_auto_analysis_planner_uses_recent_context_for_prompt(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    await runtime.storage.append_chat_message("group:456", "user", "a(QQ:111)：YueScript 的 switch 生成代码有点怪")
+    runtime.group_chat.classifier_client = FakeClassifierClient(
+        {
+            "should_accept": True,
+            "kind": "project_question",
+            "action": "record_feedback",
+            "project": "Dora-SSR",
+            "confidence": 0.91,
+            "needs_repo_analysis": True,
+            "summary": "询问上文的问题",
+        }
+    )
+    planner = FakePlannerClient(
+        {
+            "should_create_analysis": True,
+            "repo_key": "yuescript",
+            "title": "YueScript switch 生成代码异常",
+            "analysis_task": "请检查 YueScript switch 语句生成代码的实现，确认上文提到的异常可能来自哪里。",
+            "context_summary": "用户先提到 YueScript switch 生成代码异常，随后追问是否需要看仓库。",
+            "reject_reason": "",
+            "questions_for_user": [],
+            "confidence": "high",
+        }
+    )
+    runtime.group_chat.planner_client = planner  # type: ignore[assignment]
+
+    async def fake_ensure_mirror(repo_key, repo):
+        return tmp_path
+
+    captured: dict[str, object] = {}
+
+    async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
+        captured.update(repo_key=repo_key, prompt_text=prompt_text, trigger_source=trigger_source)
+        return 123
+
+    runtime.group_chat.tracker.ensure_mirror = fake_ensure_mirror  # type: ignore[method-assign]
+    runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="这个要不要跑仓库分析？")
+    )
+
+    assert result is not None
+    assert result.reason == "auto_accepted"
+    assert captured["repo_key"] == "yuescript"
+    assert "请检查 YueScript switch" in str(captured["prompt_text"])
+    assert "a(QQ:111)：YueScript" in planner.calls[0][1]["content"]
+    assert "a(QQ:111)：YueScript" not in str(captured["prompt_text"])
+
+
+@pytest.mark.asyncio
+async def test_group_auto_analysis_planner_can_reject_job(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    runtime.group_chat.classifier_client = FakeClassifierClient(
+        {
+            "should_accept": True,
+            "kind": "project_question",
+            "action": "record_feedback",
+            "project": "Dora-SSR",
+            "confidence": 0.91,
+            "needs_repo_analysis": True,
+            "summary": "可能需要分析",
+        }
+    )
+    runtime.group_chat.planner_client = FakePlannerClient(
+        {
+            "should_create_analysis": False,
+            "repo_key": None,
+            "title": "普通追问",
+            "analysis_task": "",
+            "context_summary": "上下文显示这不是项目问题。",
+            "reject_reason": "只是接着闲聊，不需要仓库分析。",
+            "questions_for_user": ["如果是具体问题，请补充报错。"],
+            "confidence": "high",
+        }
+    )  # type: ignore[assignment]
+
+    async def fail_create_feedback_analysis(*args, **kwargs):
+        raise AssertionError("analysis job should not be created")
+
+    runtime.group_chat.jobs.create_feedback_analysis = fail_create_feedback_analysis  # type: ignore[method-assign]
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="这个要不要跑仓库分析？")
+    )
+
+    assert result is not None
+    assert result.reason == "planner_rejected"
+    assert result.analysis_job_id is None
+    assert result.accepted_for_analysis is False
 
 
 @pytest.mark.asyncio

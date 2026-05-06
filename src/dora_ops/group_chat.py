@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 import time
 
+from .analysis_planner import AnalysisPlan, plan_feedback_analysis_with_llm
 from .classifier import Classification, classify_text_with_llm
 from .config import BotConfig
 from .jobs import JobManager
@@ -117,6 +118,7 @@ class GroupMessageService:
         jobs: JobManager,
         chat_client: OpenAICompatibleChatClient | None = None,
         classifier_client: OpenAICompatibleChatClient | None = None,
+        planner_client: OpenAICompatibleChatClient | None = None,
     ):
         self.config = config
         self.storage = storage
@@ -124,6 +126,7 @@ class GroupMessageService:
         self.jobs = jobs
         self.chat_client = chat_client
         self.classifier_client = classifier_client
+        self.planner_client = planner_client
         self._last_chat_reply_at: dict[int, float] = {}
 
     async def handle(self, msg: GroupMessageInput) -> GroupMessageResult | None:
@@ -219,10 +222,14 @@ class GroupMessageService:
                     feedback_id=feedback_id,
                     classification=classification,
                     text=text,
+                    group_id=msg.group_id,
                     triggered_by=str(msg.user_id),
                 )
-                accepted_for_analysis = True
-                reason = "auto_accepted"
+                if analysis_job_id is not None:
+                    accepted_for_analysis = True
+                    reason = "auto_accepted"
+                else:
+                    reason = "planner_rejected"
             else:
                 reason = "manual_required"
                 if feedback_id is not None:
@@ -462,17 +469,29 @@ class GroupMessageService:
         feedback_id: int,
         classification: Classification,
         text: str,
+        group_id: int,
         triggered_by: str,
-    ) -> int:
-        repo_key = self._repo_key_for_project(classification.project)
+    ) -> int | None:
+        plan = await self._plan_feedback_analysis(classification=classification, text=text, group_id=group_id)
+        if not plan.should_create_analysis:
+            logger.info(
+                "feedback analysis planner rejected group job: group=%s feedback=%s reason=%r",
+                group_id,
+                feedback_id,
+                plan.reject_reason,
+            )
+            return None
+        repo_key = plan.repo_key or self._repo_key_for_project(classification.project)
         repo = self.config.repositories[repo_key]
         mirror = await self.tracker.ensure_mirror(repo_key, repo)
         prompt = feedback_analysis_prompt(
             repo_name=repo.name,
             project=classification.project,
             kind=classification.kind,
-            title=classification.summary[:40],
+            title=plan.title or classification.summary[:40],
             original_text=text,
+            analysis_task=plan.analysis_task,
+            context_summary=plan.context_summary,
         )
         return await self.jobs.create_feedback_analysis(
             repo_key,
@@ -482,6 +501,24 @@ class GroupMessageService:
             triggered_by=triggered_by,
             trigger_source="group_auto_analysis",
         )
+
+    async def _plan_feedback_analysis(self, *, classification: Classification, text: str, group_id: int) -> AnalysisPlan:
+        context = await self._recent_group_context(group_id)
+        client = self.planner_client if self.config.llm.enabled else None
+        return await plan_feedback_analysis_with_llm(
+            client=client,
+            repositories={key: repo.name for key, repo in self.config.repositories.items()},
+            classification=classification,
+            original_text=text,
+            recent_context=context,
+        )
+
+    async def _recent_group_context(self, group_id: int) -> str:
+        rows = await self.storage.list_recent_chat_messages(
+            self._group_conversation_key(group_id),
+            self.config.llm.max_context_messages,
+        )
+        return "\n".join(f"{row['role']}: {row['content']}" for row in rows)
 
     @staticmethod
     def _repo_key_for_project(project: object) -> str:

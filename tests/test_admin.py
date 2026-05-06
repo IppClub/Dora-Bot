@@ -88,6 +88,17 @@ class FakeClassifierClient:
         return self.result
 
 
+class FakePlannerClient:
+    def __init__(self, result: dict[str, object]):
+        self.result = result
+        self.calls: list[list[dict[str, str]]] = []
+
+    async def complete_tool_call(self, messages, *, tool, tool_name):
+        assert tool_name == "plan_feedback_analysis"
+        self.calls.append(messages)
+        return self.result
+
+
 def test_admin_project_route_prefers_dora_ssr_for_combined_project() -> None:
     assert AdminCommands._repo_key_for_project("Dora-SSR/YueScript") == "dora_ssr"
     assert AdminCommands._repo_key_for_project("YueScript") == "yuescript"
@@ -724,6 +735,53 @@ async def test_admin_private_project_question_records_without_llm_reply(tmp_path
     assert feedback["kind"] == "project_question"
     approval = await runtime.storage.get_pending_approval("feedback", 1)
     assert approval is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_approve_uses_planner_rejection(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    feedback_id = await runtime.storage.create_feedback(
+        original_text="这个要不要跑仓库分析？",
+        group_id=456,
+        user_id=789,
+        project="Dora-SSR",
+        kind="project_question",
+        title="可能需要分析",
+        normalized_summary="可能需要分析",
+    )
+    await runtime.storage.create_approval_request(
+        target_type="feedback",
+        target_id=feedback_id,
+        requested_by=789,
+        requested_group_id=456,
+        command=f"/approve feedback {feedback_id}",
+    )
+    runtime.admin.planner_client = FakePlannerClient(
+        {
+            "should_create_analysis": False,
+            "repo_key": None,
+            "title": "普通追问",
+            "analysis_task": "",
+            "context_summary": "上下文显示这不是可分析的仓库问题。",
+            "reject_reason": "信息不足，无法形成仓库分析任务。",
+            "questions_for_user": ["请补充具体仓库、报错或复现步骤。"],
+            "confidence": "high",
+        }
+    )  # type: ignore[assignment]
+
+    async def fail_create_feedback_analysis(*args, **kwargs):
+        raise AssertionError("analysis job should not be created")
+
+    runtime.admin.jobs.create_feedback_analysis = fail_create_feedback_analysis  # type: ignore[method-assign]
+
+    result = await runtime.handle_admin_text(f"/approve feedback {feedback_id}", user_id=123)
+
+    assert result is not None
+    assert "不建议创建仓库分析任务" in result
+    assert "信息不足" in result
+    assert await runtime.storage.get_pending_approval("feedback", feedback_id) is None
 
 
 @pytest.mark.asyncio
