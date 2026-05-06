@@ -342,11 +342,13 @@ class GroupMessageService:
     def _should_explain(classification: Classification, *, mentions_bot: bool) -> bool:
         if mentions_bot:
             return True
-        if classification.action not in {"answer_question", "reply"}:
+        if classification.confidence < PASSIVE_REPLY_CONFIDENCE:
             return False
-        if classification.kind != "project_question":
-            return False
-        return classification.confidence >= PASSIVE_REPLY_CONFIDENCE
+        if classification.action == "reply":
+            return True
+        if classification.action == "answer_question" and classification.kind == "project_question":
+            return True
+        return False
 
     def _chat_available(self) -> bool:
         return self.config.group_chat.chat_enabled and self.config.llm.enabled and self.chat_client is not None

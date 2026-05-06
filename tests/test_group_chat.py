@@ -298,6 +298,37 @@ async def test_group_chat_llm_empty_response_stays_silent(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_group_chat_high_confidence_reply_action_can_reply_without_mention(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient(["当然能看到，你这句是在问我昵称。"])
+    classifier = FakeClassifierClient(
+        {
+            "should_accept": False,
+            "kind": "chat",
+            "action": "reply",
+            "project": None,
+            "confidence": 0.90,
+            "needs_repo_analysis": False,
+            "summary": "追问机器人上一条回复",
+        }
+    )
+    runtime.group_chat.chat_client = chat
+    runtime.group_chat.classifier_client = classifier
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="我现在不 at 你就不会回复吗？")
+    )
+
+    assert result is not None
+    assert result.reason == "llm_chat"
+    assert result.reply == "当然能看到，你这句是在问我昵称。"
+    assert chat.calls
+    assert "我现在不 at 你就不会回复吗？" in chat.calls[0][-1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_group_chat_llm_final_user_message_is_latest_message(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
