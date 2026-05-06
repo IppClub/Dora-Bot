@@ -418,4 +418,4 @@ async def test_group_chat_history_preserves_non_bot_mentions_as_targets(tmp_path
 
     assert result is None
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
-    assert recent[0]["content"] == "我心飞翔(QQ:789)：@yuueang 大佬的行动力太惊人了 [mentions: @yuueang(QQ:111)]"
+    assert recent[0]["content"] == "我心飞翔(QQ:789)：@yuueang 大佬的行动力太惊人了 [mentions: @yuueang(QQ: 111)]"

@@ -133,12 +133,26 @@ class FakeQQAPI:
     def __init__(self):
         self.private_messages = []
         self.group_messages = []
+        self.query = FakeQQQuery()
 
     async def post_private_msg(self, user_id, **kwargs):
         self.private_messages.append((user_id, kwargs))
 
     async def post_group_msg(self, group_id, **kwargs):
         self.group_messages.append((group_id, kwargs))
+
+
+class FakeQQQuery:
+    def __init__(self):
+        self.members = {}
+        self.calls = []
+
+    async def get_group_member_info(self, group_id, user_id):
+        self.calls.append((group_id, user_id))
+        return self.members.get(
+            str(user_id),
+            SimpleNamespace(card="", nickname=""),
+        )
 
 
 class FakeDebounceRuntime:
@@ -189,7 +203,7 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
 def test_plugin_message_segments_support_ncatbot_objects() -> None:
     msg = SimpleNamespace(self_id="999", message=[FakePlainText("准备 "), FakePlainText("尝试一种模式"), FakeAt(999)])
 
-    assert DoraOpsPlugin._message_text(msg) == "准备 尝试一种模式@999"
+    assert DoraOpsPlugin._message_text(msg) == "准备 尝试一种模式@QQ: 999"
     assert DoraOpsPlugin._extract_text(msg) == "准备 尝试一种模式"
     assert DoraOpsPlugin._mentions_bot(msg) is True
     assert DoraOpsPlugin._mentions(msg)[0].user_id == "999"
@@ -204,7 +218,7 @@ def test_plugin_message_text_prefers_raw_message() -> None:
 def test_plugin_message_segments_support_message_array_helpers() -> None:
     msg = SimpleNamespace(self_id="999", message=FakeMessageArray())
 
-    assert DoraOpsPlugin._message_text(msg) == "@999"
+    assert DoraOpsPlugin._message_text(msg) == "@QQ: 999"
     assert DoraOpsPlugin._extract_text(msg) == "array text"
     assert DoraOpsPlugin._mentions_bot(msg) is True
 
@@ -212,7 +226,7 @@ def test_plugin_message_segments_support_message_array_helpers() -> None:
 def test_plugin_message_segments_support_to_dict_objects() -> None:
     msg = SimpleNamespace(message=[FakeToDictText(), FakeToDictAt()])
 
-    assert DoraOpsPlugin._message_text(msg) == "dict text@yuueang"
+    assert DoraOpsPlugin._message_text(msg) == "dict text@yuueang(QQ: 111)"
     assert DoraOpsPlugin._extract_text(msg) == "dict text"
     assert DoraOpsPlugin._mentions(msg)[0].display_name == "yuueang"
 
@@ -220,8 +234,45 @@ def test_plugin_message_segments_support_to_dict_objects() -> None:
 def test_plugin_only_treats_at_self_as_bot_mention() -> None:
     msg = SimpleNamespace(self_id="999", message=[FakePlainText("哇 "), FakeAt(111, "yuueang"), FakePlainText(" 大佬")])
 
-    assert DoraOpsPlugin._message_text(msg) == "哇 @yuueang 大佬"
+    assert DoraOpsPlugin._message_text(msg) == "哇 @yuueang(QQ: 111) 大佬"
     assert DoraOpsPlugin._mentions_bot(msg) is False
+
+
+def test_plugin_rewrites_raw_cq_at_segments_for_context() -> None:
+    msg = SimpleNamespace(
+        self_id="3844055063",
+        raw_message="[CQ:at,qq=3844055063] 现在可以分辨 [CQ:at,qq=405682409] 吗",
+        message=[],
+    )
+
+    assert DoraOpsPlugin._message_text(msg) == "@QQ: 3844055063 现在可以分辨 @QQ: 405682409 吗"
+    assert DoraOpsPlugin._mentions_bot(msg) is True
+    assert [mention.user_id for mention in DoraOpsPlugin._mentions(msg)] == ["3844055063", "405682409"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_resolves_raw_cq_mentions_with_group_member_info() -> None:
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    qq.query.members = {
+        "3844055063": SimpleNamespace(card="多萝", nickname="Dora"),
+        "405682409": SimpleNamespace(card="", nickname="李瑾"),
+    }
+    plugin.api = SimpleNamespace(qq=qq)
+    msg = SimpleNamespace(
+        self_id="3844055063",
+        raw_message="[CQ:at,qq=3844055063] 可以分辨 [CQ:at,qq=405682409] 吗",
+        message=[],
+    )
+
+    text, mentions = await plugin._group_message_text_and_mentions(456, msg)
+
+    assert text == "@多萝(QQ: 3844055063) 可以分辨 @李瑾(QQ: 405682409) 吗"
+    assert [(mention.user_id, mention.display_name) for mention in mentions] == [
+        ("3844055063", "多萝"),
+        ("405682409", "李瑾"),
+    ]
+    assert qq.query.calls == [(456, "3844055063"), (456, "405682409")]
 
 
 @pytest.mark.asyncio

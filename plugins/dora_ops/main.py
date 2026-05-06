@@ -131,11 +131,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
         @registrar.qq.on_group_message()
         async def on_group_message(self, event) -> None:
-            text = self._message_text(event)
             user_id = int(getattr(getattr(event, "sender", None), "user_id", 0) or getattr(event, "user_id", 0))
             group_id = int(getattr(event, "group_id", 0))
+            text, mentions = await self._group_message_text_and_mentions(group_id, event)
             mentions_bot = self._mentions_bot(event)
-            mentions = self._mentions(event)
             logger.info(
                 "group message received: group=%s user=%s mentions_bot=%s text=%r",
                 group_id,
@@ -170,11 +169,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 self._maybe_watch_feedback_analysis(result)
 
         async def on_group_message(self, msg) -> None:
-            text = self._message_text(msg)
             user_id = int(getattr(getattr(msg, "sender", None), "user_id", 0) or getattr(msg, "user_id", 0))
             group_id = int(getattr(msg, "group_id", 0))
+            text, mentions = await self._group_message_text_and_mentions(group_id, msg)
             mentions_bot = self._mentions_bot(msg)
-            mentions = self._mentions(msg)
             logger.info(
                 "group message received: group=%s user=%s mentions_bot=%s text=%r",
                 group_id,
@@ -293,12 +291,21 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         raw = str(getattr(msg, "raw_message", "") or "")
         if raw and "[CQ:" not in raw:
             return raw
-        rendered = DoraOpsPlugin._render_message(msg)
+        rendered = DoraOpsPlugin._render_message(msg, raw=raw)
         return str(rendered or raw or getattr(msg, "text", "") or "")
 
+    async def _group_message_text_and_mentions(self, group_id: int, msg) -> tuple[str, tuple[GroupMention, ...]]:
+        raw = str(getattr(msg, "raw_message", "") or "")
+        mentions = await self._resolve_mentions(group_id, self._mentions(msg))
+        if raw and "[CQ:" not in raw:
+            return raw, mentions
+        rendered = self._render_message(msg, raw=raw, mentions=mentions)
+        return str(rendered or raw or getattr(msg, "text", "") or ""), mentions
+
     @staticmethod
-    def _render_message(msg) -> str:
-        message = getattr(msg, "message", []) or []
+    def _render_message(msg, *, raw: str = "", mentions: tuple[GroupMention, ...] = ()) -> str:
+        message = DoraOpsPlugin._message_segments(msg, raw=raw)
+        mention_map = {mention.user_id: mention for mention in mentions}
         chunks: list[str] = []
         for item in message:
             segment_type = DoraOpsPlugin._segment_type(item)
@@ -306,15 +313,46 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 chunks.append(DoraOpsPlugin._segment_text(item))
             elif segment_type == "at":
                 mention = DoraOpsPlugin._segment_mention(item)
-                if mention.user_id == "all":
-                    chunks.append("@全体成员")
-                else:
-                    display = mention.display_name or mention.user_id
-                    chunks.append(f"@{display}")
+                chunks.append(DoraOpsPlugin._mention_inline_label(mention_map.get(mention.user_id, mention)))
         if chunks:
             return "".join(chunks)
-        text = getattr(message, "text", None)
+        original_message = getattr(msg, "message", []) or []
+        text = getattr(original_message, "text", None)
         return text if isinstance(text, str) else ""
+
+    async def _resolve_mentions(self, group_id: int, mentions: tuple[GroupMention, ...]) -> tuple[GroupMention, ...]:
+        query = getattr(getattr(getattr(self, "api", None), "qq", None), "query", None)
+        get_member = getattr(query, "get_group_member_info", None)
+        if not callable(get_member):
+            return mentions
+
+        resolved: list[GroupMention] = []
+        cache: dict[str, GroupMention] = {}
+        for mention in mentions:
+            if mention.user_id in {"all", "unknown"} or not mention.user_id.isdigit():
+                resolved.append(mention)
+                continue
+            cached = cache.get(mention.user_id)
+            if cached is not None:
+                resolved.append(cached)
+                continue
+            display_name = mention.display_name
+            try:
+                member = await get_member(group_id, mention.user_id)
+                card = str(getattr(member, "card", "") or "").strip()
+                nickname = str(getattr(member, "nickname", "") or "").strip()
+                display_name = card or nickname or display_name
+            except Exception:
+                logger.info(
+                    "group mention resolve failed: group=%s user=%s",
+                    group_id,
+                    mention.user_id,
+                    exc_info=True,
+                )
+            updated = GroupMention(user_id=mention.user_id, display_name=display_name)
+            cache[mention.user_id] = updated
+            resolved.append(updated)
+        return tuple(resolved)
 
     @staticmethod
     def _clip_log(text: str, limit: int = 160) -> str:
@@ -335,7 +373,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     @staticmethod
     def _mentions_bot(msg) -> bool:
-        message = getattr(msg, "message", []) or []
+        raw = str(getattr(msg, "raw_message", "") or "")
+        message = DoraOpsPlugin._message_segments(msg, raw=raw)
         self_id = str(getattr(msg, "self_id", "") or getattr(getattr(msg, "data", None), "self_id", "")).strip()
         if not self_id:
             return False
@@ -351,12 +390,27 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     @staticmethod
     def _mentions(msg) -> tuple[GroupMention, ...]:
-        message = getattr(msg, "message", []) or []
+        raw = str(getattr(msg, "raw_message", "") or "")
+        message = DoraOpsPlugin._message_segments(msg, raw=raw)
         mentions: list[GroupMention] = []
         for item in message:
             if DoraOpsPlugin._segment_type(item) == "at":
                 mentions.append(DoraOpsPlugin._segment_mention(item))
         return tuple(mentions)
+
+    @staticmethod
+    def _message_segments(msg, *, raw: str = ""):
+        message = getattr(msg, "message", []) or []
+        if message:
+            return message
+        if "[CQ:" not in raw:
+            return message
+        try:
+            from ncatbot.types.qq.segment.cq import parse_cq_code_to_onebot11
+
+            return parse_cq_code_to_onebot11(raw)
+        except Exception:
+            return message
 
     @staticmethod
     def _segment_type(item) -> str:
@@ -421,6 +475,15 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             or ""
         ).strip()
         return GroupMention(user_id=user_id or "unknown", display_name=display_name)
+
+    @staticmethod
+    def _mention_inline_label(mention: GroupMention) -> str:
+        if mention.user_id == "all":
+            return "@全体成员"
+        display = mention.display_name.strip()
+        if display and display != mention.user_id:
+            return f"@{display}(QQ: {mention.user_id})"
+        return f"@QQ: {mention.user_id}"
 
     @staticmethod
     def _segment_data(item) -> dict[str, object]:

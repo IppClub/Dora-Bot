@@ -405,7 +405,7 @@ class GroupMessageService:
                 labels.append("@全体成员")
                 continue
             display = mention.display_name.strip() or mention.user_id
-            labels.append(f"@{display}(QQ:{mention.user_id})")
+            labels.append(f"@{display}(QQ: {mention.user_id})")
         return ", ".join(labels)
 
     async def _can_auto_create_analysis(self) -> bool:
