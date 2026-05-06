@@ -276,6 +276,9 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "assistant"]
     assert "tester(QQ:789)：" in recent[0]["content"]
+    assert fake.calls[0][-1]["role"] == "user"
+    assert "# 最新群聊消息" in fake.calls[0][-1]["content"]
+    assert "tester(QQ:789)：多萝，今天聊点啥" in fake.calls[0][-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -292,6 +295,38 @@ async def test_group_chat_llm_empty_response_stays_silent(tmp_path: Path) -> Non
 
     assert result is None
     assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_group_chat_llm_final_user_message_is_latest_message(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    await runtime.storage.append_chat_message("group:456", "user", "H_PIGCATDOG(QQ:111)：简单介绍一下Dora引擎里TSTL")
+    await runtime.storage.append_chat_message("group:456", "assistant", "TSTL 就是 Dora SSR 里把 TS/TSX 转成 Lua 的组件。")
+    fake = FakeChatClient(["你这句 at 了 H_PIGCATDOG，不是在问 TSTL。"])
+    runtime.group_chat.chat_client = fake
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=111,
+            nickname="H_PIGCATDOG",
+            text="@多萝(QQ: 3844055063) 你能看到我在 at 谁吗？告诉我你看到我这句话at的人。 @H_PIGCATDOG(QQ: 111)",
+            mentions_bot=True,
+            mentions=(GroupMention("3844055063", "多萝"), GroupMention("111", "H_PIGCATDOG")),
+        )
+    )
+
+    assert result is not None
+    assert result.reply == "你这句 at 了 H_PIGCATDOG，不是在问 TSTL。"
+    assert fake.calls
+    llm_messages = fake.calls[0]
+    assert llm_messages[-1]["role"] == "user"
+    assert "# 最新群聊消息" in llm_messages[-1]["content"]
+    assert "你能看到我在 at 谁吗" in llm_messages[-1]["content"]
+    assert "@H_PIGCATDOG(QQ: 111)" in llm_messages[-1]["content"]
+    assert "TSTL" not in llm_messages[-1]["content"]
 
 
 @pytest.mark.asyncio

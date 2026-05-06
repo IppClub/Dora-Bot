@@ -154,11 +154,14 @@ class GroupMessageService:
             return None
 
         conversation_key = self._group_conversation_key(msg.group_id)
+        latest_user_messages: list[str] = []
         for item in messages:
+            formatted = self._format_group_user_message(item, mentions_bot=item.mentions_bot)
+            latest_user_messages.append(formatted)
             await self.storage.append_chat_message(
                 conversation_key,
                 "user",
-                self._format_group_user_message(item, mentions_bot=item.mentions_bot),
+                formatted,
             )
         classification = await self._classify(text)
         logger.info(
@@ -252,6 +255,7 @@ class GroupMessageService:
             reply = await self._llm_group_chat_reply(
                 msg.group_id,
                 conversation_key,
+                latest_user_messages=tuple(latest_user_messages),
                 force=mentions_bot or should_explain,
             )
             if reply:
@@ -351,7 +355,14 @@ class GroupMessageService:
         client = self.classifier_client if self.config.llm.enabled else None
         return await classify_text_with_llm(text, client)
 
-    async def _llm_group_chat_reply(self, group_id: int, conversation_key: str, *, force: bool) -> str | None:
+    async def _llm_group_chat_reply(
+        self,
+        group_id: int,
+        conversation_key: str,
+        *,
+        latest_user_messages: tuple[str, ...],
+        force: bool,
+    ) -> str | None:
         if not force and not self._can_chat(group_id, mentions_bot=False):
             return None
         assert self.chat_client is not None
@@ -365,8 +376,21 @@ class GroupMessageService:
                 "content": GROUP_CHAT_SYSTEM_PROMPT,
             }
         ]
-        messages.extend({"role": str(row["role"]), "content": str(row["content"])} for row in recent)
-        messages.append({"role": "user", "content": "请根据上述规则判断是否需要回复，并严格按格式输出。"})
+        history = self._history_without_latest(recent, latest_user_messages)
+        messages.extend({"role": str(row["role"]), "content": str(row["content"])} for row in history)
+        latest_text = "\n".join(latest_user_messages) or "(空消息)"
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "# 最新群聊消息\n"
+                    f"{latest_text}\n\n"
+                    "请只判断并回应上面的最新群聊消息；历史只用于理解上下文。"
+                    "如果最新消息是在问你 at 了谁，就直接根据最新消息里的 [mentions: ...] 或 @姓名(QQ: ...) 回答。"
+                    "仍然必须遵守系统规则，不需要回复时返回空字符串。"
+                ),
+            }
+        )
         try:
             reply = await self.chat_client.complete(messages)
         except LLMError as exc:
@@ -378,6 +402,23 @@ class GroupMessageService:
             return None
         self._last_chat_reply_at[group_id] = time.monotonic()
         return reply
+
+    @staticmethod
+    def _history_without_latest(
+        recent: list[dict[str, object]],
+        latest_user_messages: tuple[str, ...],
+    ) -> list[dict[str, object]]:
+        history = list(recent)
+        remaining = list(latest_user_messages)
+        while history and remaining:
+            last = history[-1]
+            if str(last.get("role") or "") != "user":
+                break
+            if str(last.get("content") or "") != remaining[-1]:
+                break
+            history.pop()
+            remaining.pop()
+        return history
 
     @staticmethod
     def _group_conversation_key(group_id: int) -> str:
