@@ -24,6 +24,14 @@ group_chat:
   # First N repository-analysis requests in the previous 24 hours are accepted automatically.
   auto_analysis_24h_limit: 10
 
+welcome:
+  enabled: false
+  # Empty means use group_chat.enabled_group_ids. If both are empty, all groups are allowed.
+  enabled_group_ids: []
+  message: |
+    欢迎 {name} 加入 Dora 社区！
+    有 Dora SSR / YueScript 相关问题可以直接在群里问。
+
 repositories:
   dora_ssr:
     name: Dora SSR

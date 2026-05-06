@@ -30,6 +30,12 @@ admin:
   group_ids: []
 group_chat:
   auto_analysis_24h_limit: 0
+welcome:
+  enabled: true
+  enabled_group_ids: [456]
+  message: |
+    欢迎 {name} 加入 Dora 社区！
+    QQ：{user_id}
 repositories:
   dora_ssr:
     name: Dora SSR
@@ -166,6 +172,9 @@ class FakeDebounceRuntime:
     async def handle_group_message(self, msg):
         self.messages.append(msg)
         return SimpleNamespace(reply=None, admin_notification=None, mention_admin_id=None, reason="test")
+
+    def render_welcome_message(self, member):
+        return None
 
 
 @pytest.mark.asyncio
@@ -320,6 +329,40 @@ async def test_plugin_sends_group_feedback_notifications_to_admins() -> None:
         (123, {"text": "群聊反馈已记录：#1"}),
         (456, {"text": "群聊反馈已记录：#1"}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_plugin_sends_welcome_message_for_group_increase(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    qq.query.members = {"789": SimpleNamespace(card="新朋友", nickname="fallback")}
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = runtime
+
+    await plugin._handle_group_increase(group_id=456, user_id=789, operator_id=123)
+
+    assert qq.query.calls == [(456, "789")]
+    assert qq.group_messages == [
+        (456, {"text": " 欢迎 新朋友 加入 Dora 社区！\nQQ：789", "at": 789})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_plugin_skips_welcome_message_for_disabled_group(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = runtime
+
+    await plugin._handle_group_increase(group_id=999, user_id=789, operator_id=123)
+
+    assert qq.group_messages == []
 
 
 @pytest.mark.asyncio
@@ -706,6 +749,50 @@ async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -
     feedback = await runtime.storage.get_feedback(1)
     assert feedback is not None
     assert feedback["group_id"] == 456
+
+
+@pytest.mark.asyncio
+async def test_welcome_test_command_previews_template(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text(
+        "/test welcome 456 789 新朋友",
+        user_id=123,
+    )
+
+    assert result is not None
+    assert "欢迎词测试结果：" in result
+    assert "群：456" in result
+    assert "用户：新朋友 (789)" in result
+    assert "欢迎词：欢迎 新朋友 加入 Dora 社区！\nQQ：789" in result
+
+
+@pytest.mark.asyncio
+async def test_welcome_test_command_reports_disabled_group(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text(
+        "/test welcome 999 789 新朋友",
+        user_id=123,
+    )
+
+    assert result is not None
+    assert "结果：未发送（欢迎词未启用或群未配置）" in result
+
+
+@pytest.mark.asyncio
+async def test_welcome_test_command_requires_group_and_user_id(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_admin_text("/test welcome 456", user_id=123)
+
+    assert result == "格式错误：/test welcome <群号> <QQ号> [昵称]"
 
 
 @pytest.mark.asyncio

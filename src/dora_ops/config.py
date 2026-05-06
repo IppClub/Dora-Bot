@@ -30,6 +30,12 @@ class GroupChatConfig(BaseModel):
     auto_analysis_24h_limit: int = 10
 
 
+class WelcomeConfig(BaseModel):
+    enabled: bool = False
+    enabled_group_ids: set[int] = Field(default_factory=set)
+    message: str = "欢迎 {name} 加入 Dora 社区！"
+
+
 class RepositoryConfig(BaseModel):
     name: str
     remote: str
@@ -72,6 +78,7 @@ class BotConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
     group_chat: GroupChatConfig = Field(default_factory=GroupChatConfig)
+    welcome: WelcomeConfig = Field(default_factory=WelcomeConfig)
     repositories: dict[str, RepositoryConfig]
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)

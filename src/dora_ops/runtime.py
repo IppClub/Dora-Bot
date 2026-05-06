@@ -10,6 +10,7 @@ from .llm import OpenAICompatibleChatClient
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
+from .welcome import WelcomeMember, WelcomeService
 
 
 class DoraOpsRuntime:
@@ -20,6 +21,7 @@ class DoraOpsRuntime:
         self.tracker = RepoTracker(base_dir, config, storage)
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
+        self.welcome = WelcomeService(config)
         chat_client = OpenAICompatibleChatClient(config.llm.chat) if config.llm.enabled else None
         classifier_client = OpenAICompatibleChatClient(config.llm.classifier) if config.llm.enabled else None
         self.group_chat = GroupMessageService(config, storage, self.tracker, self.jobs, chat_client, classifier_client)
@@ -50,3 +52,6 @@ class DoraOpsRuntime:
 
     async def handle_group_message(self, msg: GroupMessageInput) -> GroupMessageResult | None:
         return await self.group_chat.handle(msg)
+
+    def render_welcome_message(self, member: WelcomeMember) -> str | None:
+        return self.welcome.render(member)

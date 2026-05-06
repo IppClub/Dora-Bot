@@ -70,12 +70,26 @@ group_chat:
 
 With `enabled_group_ids: []`, every group is allowed. For production, fill explicit group ids. The current group-chat path is conservative: Dora SSR/YueScript-related feedback and project questions are recorded silently in the group and sent to admins by private message, unrelated messages are ignored, and the first `auto_analysis_24h_limit` repository analysis requests in the previous 24 hours are accepted automatically. Repository analysis jobs run serially, and the final summarized result is posted back to the group mentioning the original requester. Group messages are buffered for `debounce_seconds` before one handling pass. When `llm.enabled` and `group_chat.chat_enabled` are true, group chat history is stored and the chat model may reply as Dora only for non-project chat after being mentioned.
 
+Welcome message behavior:
+
+```yaml
+welcome:
+  enabled: false
+  enabled_group_ids: []
+  message: |
+    欢迎 {name} 加入 Dora 社区！
+    有 Dora SSR / YueScript 相关问题可以直接在群里问。
+```
+
+When `welcome.enabled` is true, the plugin handles NcatBot `group_increase` notices and sends the rendered template to the group while mentioning the new member. Supported placeholders are `{name}`, `{nickname}`, `{user_id}`, `{group_id}`, and `{operator_id}`. If `welcome.enabled_group_ids` is empty, the feature follows `group_chat.enabled_group_ids`; if both are empty, every group is allowed.
+
 Useful commands:
 
 ```bash
 uv run dora-bot --config dora-bot.yaml admin '/test ping' --user-id 123456
 uv run dora-bot --config dora-bot.yaml admin '/test classify Dora SSR Web IDE 无法刷新' --user-id 123456
 uv run dora-bot --config dora-bot.yaml admin '/test group-chat 123456789 Dora SSR Web IDE 无法刷新' --user-id 123456
+uv run dora-bot --config dora-bot.yaml admin '/test welcome 123456789 987654321 新朋友' --user-id 123456
 uv run dora-bot --config dora-bot.yaml admin '/test repo-check Dora-SSR' --user-id 123456
 uv run dora-bot --config dora-bot.yaml admin '/test daily-summary --dry-run' --user-id 123456
 ```
@@ -86,6 +100,7 @@ The first implemented NcatBot surface is the admin test console. These commands 
 - `/test classify <文本>`
 - `/test feedback <文本>`
 - `/test group-chat <群号> <文本>`
+- `/test welcome <群号> <QQ号> [昵称]`
 - `/test repo-check Dora-SSR|YueScript`
 - `/test tmux`
 - `/test opencode Dora-SSR|YueScript`
@@ -98,6 +113,8 @@ The first implemented NcatBot surface is the admin test console. These commands 
 Admins can also send ordinary private-chat messages. Dora SSR/YueScript-related feedback is recorded, and messages that need repository analysis create a pending approval that can be approved with `/approve feedback <id>`. Private-chat and enabled group-chat history is stored and, when `llm.enabled: true`, the chat model receives the most recent `llm.max_context_messages` messages.
 
 `/test group-chat ...` simulates the group-chat classifier, feedback recording, and approval request path from private chat. Pass the target group id explicitly.
+
+`/test welcome ...` previews the configured welcome template for a target group and QQ id without sending a group message.
 
 `/test tmux`, `/test opencode ...`, and `/test daily-summary --progress` create asynchronous jobs under `jobs/`. `/test daily-summary --progress` tests the yesterday progress analysis path for all configured repositories and the plugin automatically tracks those jobs, then sends the final summaries back to the admin private chat. `/test job-status --include-test` can still be used to reconcile and inspect recent jobs manually.
 

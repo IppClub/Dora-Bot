@@ -13,6 +13,7 @@ from .prompts import feedback_analysis_prompt, repo_diff_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
+from .welcome import WelcomeMember, WelcomeService
 
 
 try:
@@ -52,6 +53,7 @@ class AdminCommands:
         self.jobs = jobs
         self.summaries = summaries
         self.group_chat = group_chat
+        self.welcome = WelcomeService(config)
         self.chat_client = chat_client
         self.classifier_client = classifier_client
 
@@ -119,6 +121,12 @@ class AdminCommands:
         if command == "group-chat":
             try:
                 return await self._handle_group_chat_test(arg, user_id=user_id)
+            except ValueError as exc:
+                return str(exc)
+
+        if command == "welcome":
+            try:
+                return self._handle_welcome_test(arg)
             except ValueError as exc:
                 return str(exc)
 
@@ -205,6 +213,7 @@ class AdminCommands:
                 "/test classify <文本>",
                 "/test feedback <文本>",
                 "/test group-chat <群号> <文本>",
+                "/test welcome <群号> <QQ号> [昵称]",
                 "/test repo-check Dora-SSR|YueScript",
                 "/test tmux",
                 "/test opencode Dora-SSR|YueScript",
@@ -223,6 +232,27 @@ class AdminCommands:
         if result is None:
             return f"群聊测试：无响应\n群：{target_group_id}"
         return self._group_chat_test_text(target_group_id, result)
+
+    def _handle_welcome_test(self, arg: str) -> str:
+        group_id, target_user_id, name = self._parse_welcome_test(arg)
+        text = self.welcome.render(
+            WelcomeMember(
+                group_id=group_id,
+                user_id=target_user_id,
+                name=name,
+                operator_id=0,
+            )
+        )
+        lines = [
+            "欢迎词测试结果：",
+            f"群：{group_id}",
+            f"用户：{name or target_user_id} ({target_user_id})",
+        ]
+        if text is None:
+            lines.append("结果：未发送（欢迎词未启用或群未配置）")
+        else:
+            lines.append(f"欢迎词：{text}")
+        return "\n".join(lines)
 
     async def _handle_private_chat(self, text: str, *, user_id: int) -> str | None:
         normalized = text.strip()
@@ -380,6 +410,13 @@ class AdminCommands:
         if len(parts) != 2 or not parts[0].isdigit() or not parts[1].strip():
             raise ValueError("格式错误：/test group-chat <群号> <文本>")
         return int(parts[0]), parts[1].strip()
+
+    @staticmethod
+    def _parse_welcome_test(arg: str) -> tuple[int, int, str]:
+        parts = arg.split(maxsplit=2)
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            raise ValueError("格式错误：/test welcome <群号> <QQ号> [昵称]")
+        return int(parts[0]), int(parts[1]), parts[2].strip() if len(parts) > 2 else ""
 
     @staticmethod
     def _group_chat_test_text(group_id: int, result: GroupMessageResult) -> str:

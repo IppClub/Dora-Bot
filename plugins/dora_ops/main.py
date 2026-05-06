@@ -20,6 +20,7 @@ from dora_ops.runtime import DoraOpsRuntime
 from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupBufferedMessage, GroupMention, GroupMessageInput
 from dora_ops.llm import LLMError
 from dora_ops.models import JobStatus
+from dora_ops.welcome import WelcomeMember
 
 
 PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
@@ -151,6 +152,13 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 mentions=mentions,
             )
 
+        @registrar.qq.on_group_increase()
+        async def on_group_increase(self, event) -> None:
+            group_id = int(getattr(event, "group_id", 0) or 0)
+            user_id = int(getattr(event, "user_id", 0) or 0)
+            operator_id = int(getattr(event, "operator_id", 0) or 0)
+            await self._handle_group_increase(group_id=group_id, user_id=user_id, operator_id=operator_id)
+
     else:
 
         async def on_private_message(self, msg) -> None:
@@ -188,6 +196,49 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 mentions_bot=mentions_bot,
                 mentions=mentions,
             )
+
+        async def on_group_increase(self, msg) -> None:
+            group_id = int(getattr(msg, "group_id", 0) or 0)
+            user_id = int(getattr(msg, "user_id", 0) or 0)
+            operator_id = int(getattr(msg, "operator_id", 0) or 0)
+            await self._handle_group_increase(group_id=group_id, user_id=user_id, operator_id=operator_id)
+
+    async def _handle_group_increase(self, *, group_id: int, user_id: int, operator_id: int | None = None) -> None:
+        if group_id <= 0 or user_id <= 0:
+            logger.info("welcome skipped: invalid group increase event group=%s user=%s", group_id, user_id)
+            return
+        welcome = getattr(self.runtime, "welcome", None)
+        if welcome is not None and not welcome.is_enabled_for_group(group_id):
+            logger.info("welcome skipped: disabled or group not enabled group=%s user=%s", group_id, user_id)
+            return
+        name = await self._group_member_display_name(group_id, user_id)
+        text = self.runtime.render_welcome_message(
+            WelcomeMember(
+                group_id=group_id,
+                user_id=user_id,
+                name=name,
+                operator_id=operator_id,
+            )
+        )
+        if text is None:
+            logger.info("welcome skipped: disabled or group not enabled group=%s user=%s", group_id, user_id)
+            return
+        logger.info("welcome ready: group=%s user=%s name=%r", group_id, user_id, name)
+        await self._send_group_reply(group_id, text, at_user_id=user_id)
+
+    async def _group_member_display_name(self, group_id: int, user_id: int) -> str:
+        query = getattr(getattr(getattr(self, "api", None), "qq", None), "query", None)
+        get_member = getattr(query, "get_group_member_info", None)
+        if not callable(get_member):
+            return ""
+        try:
+            member = await get_member(group_id, str(user_id))
+        except Exception:
+            logger.info("group member resolve failed: group=%s user=%s", group_id, user_id, exc_info=True)
+            return ""
+        card = str(getattr(member, "card", "") or "").strip()
+        nickname = str(getattr(member, "nickname", "") or "").strip()
+        return card or nickname
 
     async def _enqueue_group_message(
         self,
