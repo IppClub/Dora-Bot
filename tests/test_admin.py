@@ -101,20 +101,32 @@ class FakePlainText:
 class FakeAt:
     type = "at"
 
+    def __init__(self, user_id: int = 999, name: str = ""):
+        self.user_id = str(user_id)
+        self.name = name
+
 
 class FakeMessageArray:
     text = "array text"
 
     def __iter__(self):
-        return iter([])
+        return iter([FakeAt(999)])
 
     def filter_at(self):
-        return [FakeAt()]
+        return [FakeAt(999)]
+
+    def is_at(self, user_id):
+        return str(user_id) == "999"
 
 
 class FakeToDictText:
     def to_dict(self):
         return {"type": "text", "data": {"text": "dict text"}}
+
+
+class FakeToDictAt:
+    def to_dict(self):
+        return {"type": "at", "data": {"qq": "111", "name": "yuueang"}}
 
 
 class FakeQQAPI:
@@ -175,11 +187,12 @@ async def test_admin_progress_report_requires_local_paths(tmp_path: Path) -> Non
 
 
 def test_plugin_message_segments_support_ncatbot_objects() -> None:
-    msg = SimpleNamespace(message=[FakePlainText("准备 "), FakePlainText("尝试一种模式"), FakeAt()])
+    msg = SimpleNamespace(self_id="999", message=[FakePlainText("准备 "), FakePlainText("尝试一种模式"), FakeAt(999)])
 
-    assert DoraOpsPlugin._message_text(msg) == "准备 尝试一种模式"
+    assert DoraOpsPlugin._message_text(msg) == "准备 尝试一种模式@999"
     assert DoraOpsPlugin._extract_text(msg) == "准备 尝试一种模式"
     assert DoraOpsPlugin._mentions_bot(msg) is True
+    assert DoraOpsPlugin._mentions(msg)[0].user_id == "999"
 
 
 def test_plugin_message_text_prefers_raw_message() -> None:
@@ -189,16 +202,26 @@ def test_plugin_message_text_prefers_raw_message() -> None:
 
 
 def test_plugin_message_segments_support_message_array_helpers() -> None:
-    msg = SimpleNamespace(message=FakeMessageArray())
+    msg = SimpleNamespace(self_id="999", message=FakeMessageArray())
 
+    assert DoraOpsPlugin._message_text(msg) == "@999"
     assert DoraOpsPlugin._extract_text(msg) == "array text"
     assert DoraOpsPlugin._mentions_bot(msg) is True
 
 
 def test_plugin_message_segments_support_to_dict_objects() -> None:
-    msg = SimpleNamespace(message=[FakeToDictText()])
+    msg = SimpleNamespace(message=[FakeToDictText(), FakeToDictAt()])
 
+    assert DoraOpsPlugin._message_text(msg) == "dict text@yuueang"
     assert DoraOpsPlugin._extract_text(msg) == "dict text"
+    assert DoraOpsPlugin._mentions(msg)[0].display_name == "yuueang"
+
+
+def test_plugin_only_treats_at_self_as_bot_mention() -> None:
+    msg = SimpleNamespace(self_id="999", message=[FakePlainText("哇 "), FakeAt(111, "yuueang"), FakePlainText(" 大佬")])
+
+    assert DoraOpsPlugin._message_text(msg) == "哇 @yuueang 大佬"
+    assert DoraOpsPlugin._mentions_bot(msg) is False
 
 
 @pytest.mark.asyncio

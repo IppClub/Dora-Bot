@@ -58,6 +58,8 @@ GROUP_CHAT_SYSTEM_PROMPT = f"""{DORA_PERSONA_PROMPT}
 3. **必须回复**的情况：
     - 消息中明确 @多萝 且不是 Dora SSR/YueScript/游戏引擎项目问题
     - 开发者表现出困惑或需要鼓励
+4. 群聊中的 `@某人` 表示消息在点名或评价这个被 @ 的人；除非目标明确是多萝或上下文明确在对多萝说话，否则不要把夸奖、感谢或调侃理解成对自己的评价
+5. 如果消息只是在 @ 其他群友并评价那个人，不要代替被 @ 的人回应，也不要把自己当成被夸奖的对象
 
 # 输出要求
 - 不需要回复时返回空字符串：""
@@ -68,11 +70,18 @@ GROUP_CHAT_SYSTEM_PROMPT = f"""{DORA_PERSONA_PROMPT}
 
 
 @dataclass(frozen=True)
+class GroupMention:
+    user_id: str
+    display_name: str = ""
+
+
+@dataclass(frozen=True)
 class GroupBufferedMessage:
     user_id: int
     nickname: str
     text: str
     mentions_bot: bool = False
+    mentions: tuple[GroupMention, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -82,6 +91,7 @@ class GroupMessageInput:
     nickname: str
     text: str
     mentions_bot: bool = False
+    mentions: tuple[GroupMention, ...] = ()
     buffered_messages: tuple[GroupBufferedMessage, ...] = ()
 
 
@@ -136,7 +146,7 @@ class GroupMessageService:
                 logger.info("group chat skipped: empty text group=%s user=%s", msg.group_id, msg.user_id)
                 return None
             text = "@多萝"
-            messages = (GroupBufferedMessage(msg.user_id, msg.nickname, text, True),)
+            messages = (GroupBufferedMessage(msg.user_id, msg.nickname, text, True, msg.mentions),)
         text = self._classification_text(messages)
         mentions_bot = msg.mentions_bot or any(item.mentions_bot or self._contains_alias(item.text) for item in messages)
         if text.startswith("/test"):
@@ -148,7 +158,7 @@ class GroupMessageService:
             await self.storage.append_chat_message(
                 conversation_key,
                 "user",
-                self._format_group_user_message(item.nickname, item.text, mentions_bot=item.mentions_bot),
+                self._format_group_user_message(item, mentions_bot=item.mentions_bot),
             )
         classification = await self._classify(text)
         logger.info(
@@ -304,13 +314,17 @@ class GroupMessageService:
         text = msg.text.strip()
         if not text:
             return ()
-        return (GroupBufferedMessage(msg.user_id, msg.nickname, text, msg.mentions_bot),)
+        return (GroupBufferedMessage(msg.user_id, msg.nickname, text, msg.mentions_bot, msg.mentions),)
 
     @staticmethod
     def _classification_text(messages: tuple[GroupBufferedMessage, ...]) -> str:
         if len(messages) == 1:
             return messages[0].text.strip()
-        return "\n".join(f"{item.nickname or item.user_id}: {item.text.strip()}" for item in messages if item.text.strip())
+        return "\n".join(
+            f"{GroupMessageService._sender_label(item)}: {item.text.strip()}"
+            for item in messages
+            if item.text.strip()
+        )
 
     def _can_chat(self, group_id: int, *, mentions_bot: bool) -> bool:
         if not self._chat_available():
@@ -370,11 +384,29 @@ class GroupMessageService:
         return f"group:{group_id}"
 
     @staticmethod
-    def _format_group_user_message(nickname: str, text: str, *, mentions_bot: bool) -> str:
-        display = text
+    def _format_group_user_message(item: GroupBufferedMessage, *, mentions_bot: bool) -> str:
+        display = item.text
         if mentions_bot and "@多萝" not in display and "多萝" not in display:
             display = f"{display} @多萝"
-        return f"{nickname or '群友'}：{display}"
+        mentions = GroupMessageService._mentions_label(item.mentions)
+        suffix = f" [mentions: {mentions}]" if mentions else ""
+        return f"{GroupMessageService._sender_label(item)}：{display}{suffix}"
+
+    @staticmethod
+    def _sender_label(item: GroupBufferedMessage) -> str:
+        name = item.nickname.strip() if item.nickname else "群友"
+        return f"{name}(QQ:{item.user_id})"
+
+    @staticmethod
+    def _mentions_label(mentions: tuple[GroupMention, ...]) -> str:
+        labels: list[str] = []
+        for mention in mentions:
+            if mention.user_id == "all":
+                labels.append("@全体成员")
+                continue
+            display = mention.display_name.strip() or mention.user_id
+            labels.append(f"@{display}(QQ:{mention.user_id})")
+        return ", ".join(labels)
 
     async def _can_auto_create_analysis(self) -> bool:
         since = int(time.time()) - 24 * 60 * 60

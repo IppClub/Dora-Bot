@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from dora_ops.group_chat import GroupBufferedMessage, GroupMessageInput, GroupMessageService
+from dora_ops.group_chat import GroupBufferedMessage, GroupMention, GroupMessageInput, GroupMessageService
 from dora_ops.runtime import DoraOpsRuntime
 
 
@@ -271,10 +271,11 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert "追问报错全文、平台、版本、复现步骤" in system_prompt
     assert "不要直接解释；应记录为项目问题" in system_prompt
     assert "消息中明确 @多萝 且不是 Dora SSR/YueScript/游戏引擎项目问题" in system_prompt
+    assert "不要把夸奖、感谢或调侃理解成对自己的评价" in system_prompt
     assert "不需要回复时返回空字符串" in system_prompt
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "assistant"]
-    assert "tester：" in recent[0]["content"]
+    assert "tester(QQ:789)：" in recent[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -389,8 +390,32 @@ async def test_group_buffered_messages_are_stored_separately(tmp_path: Path) -> 
     assert result.approval_id is not None
     assert result.admin_notification is not None
     assert classifier.calls
-    assert "a: 多萝，Dora SSR 资源释放有问题" in classifier.calls[0][1]["content"]
+    assert "a(QQ:789): 多萝，Dora SSR 资源释放有问题" in classifier.calls[0][1]["content"]
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "user"]
-    assert "a：" in recent[0]["content"]
-    assert "b：" in recent[1]["content"]
+    assert "a(QQ:789)：" in recent[0]["content"]
+    assert "b(QQ:790)：" in recent[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_group_chat_history_preserves_non_bot_mentions_as_targets(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient([""])
+    runtime.group_chat.chat_client = chat
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=789,
+            nickname="我心飞翔",
+            text="@yuueang 大佬的行动力太惊人了",
+            mentions_bot=False,
+            mentions=(GroupMention("111", "yuueang"),),
+        )
+    )
+
+    assert result is None
+    recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
+    assert recent[0]["content"] == "我心飞翔(QQ:789)：@yuueang 大佬的行动力太惊人了 [mentions: @yuueang(QQ:111)]"
