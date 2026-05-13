@@ -370,19 +370,20 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert result.reply == "只是刚好知道而已，别误会。"
     assert fake.calls
     system_prompt = fake.calls[0][0]["content"]
-    assert "# 角色设定" in system_prompt
-    assert "坏酷又讨人喜欢的小萝莉" in system_prompt
-    assert "# 多萝能做什么" in system_prompt
+    assert "你是多萝（Dora）。" in system_prompt
+    assert "你不是 AI 助手，也不是客服。" in system_prompt
+    assert "# 角色气质" in system_prompt
+    assert "长期混开源社区的老群友" in system_prompt
     assert "/test daily-summary --progress" not in system_prompt
     assert "/approve feedback <id>" not in system_prompt
-    assert "不能假装已经执行命令" in system_prompt
-    assert "# 能力触发规则" in system_prompt
-    assert "报错、崩溃、无法、不能、失败" in system_prompt
-    assert "追问报错全文、平台、版本、复现步骤" in system_prompt
-    assert "不要直接解释；应记录为项目问题" in system_prompt
-    assert "消息中明确 @多萝 且不是 Dora SSR/YueScript/游戏引擎项目问题" in system_prompt
-    assert "不要把夸奖、感谢或调侃理解成对自己的评价" in system_prompt
-    assert "不需要回复时返回空字符串" in system_prompt
+    assert "不要假装执行命令" in system_prompt
+    assert "# 技术回复规则" in system_prompt
+    assert "普通技术讨论" in system_prompt
+    assert "可以直接交流" in system_prompt
+    assert "平台" in system_prompt
+    assert "报错全文" in system_prompt
+    assert "不要硬猜" in system_prompt
+    assert "不需要回复时输出： \"\"" in system_prompt
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "assistant"]
     assert "tester(QQ:789)：" in recent[0]["content"]
