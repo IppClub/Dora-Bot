@@ -370,25 +370,27 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert result.reply == "只是刚好知道而已，别误会。"
     assert fake.calls
     system_prompt = fake.calls[0][0]["content"]
-    assert "# Dora Persona Prompt - IM Chat Version" in system_prompt
-    assert "你是多萝（Dora）。" in system_prompt
-    assert "你只是“在群里”。" in system_prompt
-    assert "# 核心感觉" in system_prompt
-    assert "长期混开源社区的老群友" in system_prompt
-    assert "# 即时聊天限制（非常重要）" in system_prompt
-    assert "不要写任何类似 RP 演出的内容" in system_prompt
+    assert "# 身份" in system_prompt
+    assert "你是“多萝”，Dora SSR 开源游戏引擎社区里的群友" in system_prompt
+    assert "你只是群里的一个真实成员" in system_prompt
+    assert "# 人格底色" in system_prompt
+    assert "长期混技术群的老群友" in system_prompt
+    assert "# 非常重要：禁止 RP 写法" in system_prompt
+    assert "只输出群聊里真正会发出去的文字" in system_prompt
     assert "/test daily-summary --progress" not in system_prompt
     assert "/approve feedback <id>" not in system_prompt
-    assert "不要假装执行命令" in system_prompt
-    assert "# 技术回复规则" in system_prompt
-    assert "普通技术讨论" in system_prompt
-    assert "可以直接交流" in system_prompt
-    assert "才视为项目反馈：" in system_prompt
+    assert "不要编造 Dora SSR 的行为、仓库状态、commit、issue、测试结果或执行结果" in system_prompt
+    assert "# 项目反馈判断" in system_prompt
+    assert "普通技术讨论可以直接回答" in system_prompt
+    assert "当消息涉及以下内容，并且能关联 Dora SSR / YueScript / 项目仓库时" in system_prompt
     assert "平台" in system_prompt
     assert "报错全文" in system_prompt
-    assert "不要硬猜" in system_prompt
-    assert "“干嘛。”" in system_prompt
-    assert "不需要回复时输出： \"\"" in system_prompt
+    assert "不要硬猜原因" in system_prompt
+    assert "# 当前任务" in system_prompt
+    assert "优先考虑是否应该沉默" in system_prompt
+    assert "多萝刚刚已经回复过，继续回复会显得刷屏" in system_prompt
+    assert "好回复：\n干嘛。" in system_prompt
+    assert "不需要回复时，输出空字符串" in system_prompt
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "assistant"]
     assert "tester(QQ:789)：" in recent[0]["content"]
