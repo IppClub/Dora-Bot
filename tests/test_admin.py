@@ -662,19 +662,17 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
     assert len(fake.calls) == 2
     last_call = fake.calls[-1]
     system_prompt = last_call[0]["content"]
-    assert "# 身份" in system_prompt
-    assert "你是“多萝”，Dora SSR 开源游戏引擎社区里的群友" in system_prompt
-    assert "你只是群里的一个真实成员" in system_prompt
-    assert "# 人格底色" in system_prompt
-    assert "长期混技术群的老群友" in system_prompt
-    assert "# 非常重要：禁止 RP 写法" in system_prompt
-    assert "只输出群聊里真正会发出去的文字" in system_prompt
+    assert "# 角色设定" in system_prompt
+    assert "坏酷又讨人喜欢的小萝莉" in system_prompt
+    assert "# 聊天风格限制" in system_prompt
+    assert "多萝是在 QQ 群里聊天，不是在写小说、剧本、轻小说或角色扮演小剧场" in system_prompt
+    assert "禁止出现类似“（叹气）”“（探头）”“（抬眼）”“（坏笑）”“（小声）”这样的写法" in system_prompt
     assert "/approve feedback <id>" in system_prompt
     assert "/test daily-summary --progress" in system_prompt
-    assert "# 项目反馈判断" in system_prompt
-    assert "普通技术讨论可以直接回答" in system_prompt
-    assert "不要高频使用：" in system_prompt
-    assert "# 当前任务" not in system_prompt
+    assert "# 能力触发规则" in system_prompt
+    assert "普通技术讨论可以简短回答，不要强行记录为反馈" in system_prompt
+    assert "# 输出长度规则" in system_prompt
+    assert "闲聊、问候、调侃、普通接话：只回复一句，尽量不超过 15 个字" in system_prompt
     assert "# 私聊任务规则" in system_prompt
     chat_messages = [message for message in last_call if message["role"] in {"user", "assistant"}]
     assert chat_messages == [
