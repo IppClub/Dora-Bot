@@ -662,16 +662,19 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
     assert len(fake.calls) == 2
     last_call = fake.calls[-1]
     system_prompt = last_call[0]["content"]
+    assert "# Dora Persona Prompt - IM Chat Version" in system_prompt
     assert "你是多萝（Dora）。" in system_prompt
-    assert "你不是 AI 助手，也不是客服。" in system_prompt
-    assert "# 角色气质" in system_prompt
+    assert "你只是“在群里”。" in system_prompt
+    assert "# 核心感觉" in system_prompt
     assert "长期混开源社区的老群友" in system_prompt
+    assert "# 即时聊天限制（非常重要）" in system_prompt
+    assert "不要写任何类似 RP 演出的内容" in system_prompt
     assert "/approve feedback <id>" in system_prompt
     assert "/test daily-summary --progress" in system_prompt
     assert "# 技术回复规则" in system_prompt
     assert "普通技术讨论" in system_prompt
     assert "可以直接交流" in system_prompt
-    assert "不要高频使用固定口癖" in system_prompt
+    assert "不要把“傲娇”演成模板化口癖" in system_prompt
     assert "# 私聊任务规则" in system_prompt
     chat_messages = [message for message in last_call if message["role"] in {"user", "assistant"}]
     assert chat_messages == [
