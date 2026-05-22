@@ -264,7 +264,7 @@ class AdminCommands:
             return None
         conversation_key = self._private_conversation_key(user_id)
         await self.storage.append_chat_message(conversation_key, "user", normalized)
-        classification = await self._classify_private_text(normalized)
+        classification = await self._classify_private_text(normalized, conversation_key=conversation_key)
         logger.info(
             "admin private chat classified: user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f",
             user_id,
@@ -335,9 +335,14 @@ class AdminCommands:
         compact = " ".join(str(text).split())
         return compact if len(compact) <= limit else f"{compact[:limit].rstrip()}..."
 
-    async def _classify_private_text(self, text: str):
+    async def _classify_private_text(self, text: str, *, conversation_key: str):
         client = self.classifier_client if self.config.llm.enabled else None
-        return await classify_text_with_llm(text, client)
+        recent = await self.storage.list_recent_chat_messages(
+            conversation_key,
+            self.config.llm.max_context_messages,
+        )
+        context_text = "\n".join(str(row["content"]) for row in recent[:-1])
+        return await classify_text_with_llm(text, client, context_text=context_text)
 
     def _fallback_private_chat_reply(self, classification, side_effect_note: str | None) -> str:
         if not classification.should_accept:

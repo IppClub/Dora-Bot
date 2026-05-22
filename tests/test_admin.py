@@ -698,7 +698,7 @@ async def test_admin_private_chat_uses_llm_classifier_for_feedback(tmp_path: Pat
         }
     )  # type: ignore[assignment]
 
-    result = await runtime.handle_admin_text("启动后黑屏", user_id=123)
+    result = await runtime.handle_admin_text("Dora SSR 启动后黑屏", user_id=123)
 
     assert result == "收到，已经记下了。"
     feedback = await runtime.storage.get_feedback(1)
@@ -710,7 +710,7 @@ async def test_admin_private_chat_uses_llm_classifier_for_feedback(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_admin_private_project_question_records_without_llm_reply(tmp_path: Path) -> None:
+async def test_admin_private_project_question_can_use_llm_reply_without_recording(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
@@ -730,14 +730,10 @@ async def test_admin_private_project_question_records_without_llm_reply(tmp_path
     result = await runtime.handle_admin_text("Dora SSR 渲染管线怎么拆比较稳", user_id=123)
 
     assert result is not None
-    assert "已记录为 #1" in result
-    assert "/approve feedback 1" in result
-    assert chat.calls == []
+    assert result == "不应该直接回答"
+    assert chat.calls
     feedback = await runtime.storage.get_feedback(1)
-    assert feedback is not None
-    assert feedback["kind"] == "project_question"
-    approval = await runtime.storage.get_pending_approval("feedback", 1)
-    assert approval is not None
+    assert feedback is None
 
 
 @pytest.mark.asyncio

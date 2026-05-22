@@ -2,14 +2,10 @@ from dora_ops.classifier import CLASSIFY_MESSAGE_TOOL, classify_text, classify_t
 
 
 class FakeToolClient:
-    def __init__(self):
+    def __init__(self, result: dict[str, object] | None = None):
         self.tool = None
         self.tool_name = ""
-
-    async def complete_tool_call(self, messages, *, tool, tool_name):
-        self.tool = tool
-        self.tool_name = tool_name
-        return {
+        self.result = result or {
             "should_accept": False,
             "kind": "project_question",
             "project": "Dora-SSR",
@@ -17,6 +13,11 @@ class FakeToolClient:
             "needs_repo_analysis": False,
             "summary": "询问渲染管线",
         }
+
+    async def complete_tool_call(self, messages, *, tool, tool_name):
+        self.tool = tool
+        self.tool_name = tool_name
+        return self.result
 
 
 def test_classify_dora_feedback() -> None:
@@ -38,7 +39,15 @@ def test_classify_project_question_routes_to_repo_analysis() -> None:
     assert result.should_accept is True
     assert result.kind == "project_question"
     assert result.action == "record_feedback"
-    assert result.needs_repo_analysis is True
+    assert result.needs_repo_analysis is False
+
+
+def test_classify_generic_technical_topic_does_not_infer_project() -> None:
+    result = classify_text("WASM 的渲染管线怎么拆比较稳")
+    assert result.should_accept is False
+    assert result.kind == "chat"
+    assert result.project is None
+    assert result.needs_repo_analysis is False
 
 
 async def test_llm_classifier_uses_function_calling() -> None:
@@ -48,8 +57,31 @@ async def test_llm_classifier_uses_function_calling() -> None:
 
     assert client.tool == CLASSIFY_MESSAGE_TOOL
     assert client.tool_name == "classify_message"
+    assert result.should_accept is False
+    assert result.kind == "chat"
+    assert result.project is None
+    assert result.action == "ignore"
+    assert result.needs_repo_analysis is False
+
+
+async def test_llm_classifier_can_use_context_project_anchor() -> None:
+    client = FakeToolClient(
+        {
+            "should_accept": True,
+            "kind": "project_question",
+            "project": "Dora-SSR",
+            "confidence": 0.88,
+            "needs_repo_analysis": True,
+            "summary": "追问是否需要分析",
+        }
+    )
+
+    result = await classify_text_with_llm(
+        "这个要不要跑仓库分析？",
+        client,  # type: ignore[arg-type]
+        context_text="tester(QQ:789)：Dora SSR 的 Web IDE 创建文件后无法刷新",
+    )
+
     assert result.should_accept is True
     assert result.kind == "project_question"
     assert result.project == "Dora-SSR"
-    assert result.action == "record_feedback"
-    assert result.needs_repo_analysis is True

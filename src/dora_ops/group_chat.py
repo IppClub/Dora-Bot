@@ -207,7 +207,7 @@ class GroupMessageService:
                 "user",
                 formatted,
             )
-        classification = await self._classify(text)
+        classification = await self._classify(text, conversation_key=conversation_key)
         logger.info(
             "group chat classified: group=%s user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f mentions=%s",
             msg.group_id,
@@ -401,9 +401,14 @@ class GroupMessageService:
     def _chat_available(self) -> bool:
         return self.config.group_chat.chat_enabled and self.config.llm.enabled and self.chat_client is not None
 
-    async def _classify(self, text: str) -> Classification:
+    async def _classify(self, text: str, *, conversation_key: str) -> Classification:
         client = self.classifier_client if self.config.llm.enabled else None
-        return await classify_text_with_llm(text, client)
+        recent = await self.storage.list_recent_chat_messages(
+            conversation_key,
+            self.config.llm.max_context_messages,
+        )
+        context_text = "\n".join(str(row["content"]) for row in recent[:-1])
+        return await classify_text_with_llm(text, client, context_text=context_text)
 
     async def _llm_group_chat_reply(
         self,

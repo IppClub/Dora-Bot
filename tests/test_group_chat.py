@@ -153,7 +153,7 @@ async def test_group_feedback_auto_creates_analysis_job_within_daily_limit(tmp_p
     runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
 
     result = await runtime.handle_group_message(
-        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR 渲染管线怎么拆")
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR Web IDE 创建文件后无法刷新")
     )
 
     assert result is not None
@@ -184,7 +184,7 @@ async def test_group_feedback_falls_back_to_approval_after_daily_auto_limit(tmp_
     )
 
     result = await runtime.handle_group_message(
-        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR 渲染管线怎么拆")
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="Dora SSR Web IDE 创建文件后无法刷新")
     )
 
     assert result is not None
@@ -255,6 +255,7 @@ async def test_group_auto_analysis_planner_can_reject_job(tmp_path: Path) -> Non
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    await runtime.storage.append_chat_message("group:456", "user", "a(QQ:111)：Dora SSR Web IDE 创建文件后无法刷新")
     runtime.group_chat.classifier_client = FakeClassifierClient(
         {
             "should_accept": True,
@@ -473,7 +474,7 @@ async def test_group_chat_llm_final_user_message_is_latest_message(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_group_chat_records_project_question_for_repo_analysis(tmp_path: Path) -> None:
+async def test_group_chat_does_not_record_generic_project_guess(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
@@ -495,15 +496,7 @@ async def test_group_chat_records_project_question_for_repo_analysis(tmp_path: P
         GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="这个帧管线怎么拆比较稳")
     )
 
-    assert result is not None
-    assert result.reason == "manual_required"
-    assert result.feedback_id is not None
-    assert result.approval_id is not None
-    assert result.classification.kind == "project_question"
-    assert result.classification.needs_repo_analysis is True
-    assert result.reply is None
-    assert result.admin_notification is not None
-    assert "群聊反馈已记录：#" in result.admin_notification
+    assert result is None
     assert classifier.calls
     assert chat.calls == []
 
@@ -563,14 +556,14 @@ async def test_group_buffered_messages_are_stored_separately(tmp_path: Path) -> 
     )
 
     assert result is not None
-    assert result.reply is None
-    assert result.feedback_id is not None
-    assert result.approval_id is not None
-    assert result.admin_notification is not None
+    assert result.reply == "这个像资源生命周期没收好，先看释放点。"
+    assert result.feedback_id is None
+    assert result.approval_id is None
+    assert result.admin_notification is None
     assert classifier.calls
     assert "a(QQ:789): 多萝，Dora SSR 资源释放有问题" in classifier.calls[0][1]["content"]
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
-    assert [row["role"] for row in recent] == ["user", "user"]
+    assert [row["role"] for row in recent] == ["user", "user", "assistant"]
     assert "a(QQ:789)：" in recent[0]["content"]
     assert "b(QQ:790)：" in recent[1]["content"]
 
