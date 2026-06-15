@@ -38,6 +38,26 @@ PROJECT_CONTEXT_KEYWORDS = [
     "android webview",
     "moonscript",
     "teal",
+    "pr",
+    "pull request",
+    "pull-request",
+    "merge request",
+    "mr",
+    "issue",
+    "commit",
+    "commits",
+    "branch",
+    "release",
+    "tag",
+    "仓库",
+    "代码",
+    "提交",
+    "分支",
+    "合并",
+    "拉取请求",
+    "议题",
+    "最近",
+    "哪些",
 ]
 
 FEEDBACK_KEYWORDS = [
@@ -162,7 +182,7 @@ async def classify_text_with_llm(
                         "你是 Dora Bot 的消息判断器，必须调用 classify_message 工具，不要用正文回答。\n"
                         "判断用户消息是否需要解释技术问题、是否应记录为 Dora SSR/YueScript 的有效反馈、是否需要仓库分析。\n"
                         "should_accept 表示是否应该记录并交给管理员处理，不表示是否需要回复。\n"
-                        "只有消息明确提到 Dora SSR、Dora-SSR、YueScript、dora-cli，或上下文同时出现 Dora/Yue 与 Web IDE、ActionEditor、BodyEditor 等项目专有模块时，才可以设置 project。\n"
+                        "只有消息明确提到 Dora SSR、Dora-SSR、YueScript、dora-cli，或上下文同时出现 Dora/Yue 与 Web IDE、ActionEditor、BodyEditor、PR、issue、commit、release、仓库等项目/代码仓库语境时，才可以设置 project。\n"
                         "不要把普通游戏引擎、渲染、物理、性能、WASM、parser、switch、Android/iOS/macOS/Windows 构建等通用技术话题脑补成 Dora SSR/YueScript。\n"
                         "普通技术讨论和没有明确项目锚点的问题用 kind=chat、should_accept=false；如果需要回复可用 action=reply 或 answer_question，但不要记录。\n"
                         "明确项目问题但只是问概念或设计建议时，可用 kind=project_question、action=answer_question、should_accept=false、needs_repo_analysis=false。\n"

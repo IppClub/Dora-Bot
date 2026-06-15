@@ -42,6 +42,15 @@ def test_classify_project_question_routes_to_repo_analysis() -> None:
     assert result.needs_repo_analysis is True
 
 
+def test_classify_dora_repository_question_routes_to_repo_analysis() -> None:
+    result = classify_text("Dora最近的pr有哪些")
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.action == "record_feedback"
+    assert result.project == "Dora-SSR"
+    assert result.needs_repo_analysis is True
+
+
 def test_classify_project_fault_language_routes_to_repo_analysis() -> None:
     result = classify_text("多萝，Dora SSR 资源释放有问题，场景切换后显存没下来")
     assert result.should_accept is True
