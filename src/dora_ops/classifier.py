@@ -47,6 +47,16 @@ FEEDBACK_KEYWORDS = [
     "崩溃",
     "不能",
     "无法",
+    "问题",
+    "异常",
+    "不对",
+    "不正常",
+    "有问题",
+    "没下来",
+    "没释放",
+    "泄漏",
+    "卡死",
+    "闪退",
     "希望",
     "建议",
     "bug",
@@ -54,6 +64,8 @@ FEEDBACK_KEYWORDS = [
     "error",
     "fail",
     "broken",
+    "wrong",
+    "leak",
 ]
 
 
@@ -126,7 +138,7 @@ def classify_text(text: str) -> Classification:
     if feedback_hits and project:
         return Classification(True, "feedback", "record_feedback", project, 0.82, True, text[:120])
     if project:
-        return Classification(True, "project_question", "record_feedback", project, 0.66, False, text[:120])
+        return Classification(True, "project_question", "record_feedback", project, 0.66, True, text[:120])
     if feedback_hits:
         return Classification(False, "possible_feedback_unrelated", "ignore", None, 0.45, False, text[:120])
     return Classification(False, "chat", "ignore", None, 0.25, False, text[:120])
@@ -210,11 +222,9 @@ def _classification_from_mapping(value: dict[str, Any], *, original_text: str, c
                 action = "ignore"
         confidence = min(confidence, 0.55)
     elif kind == "project_question":
-        if should_accept:
-            action = "record_feedback"
-        elif action == "record_feedback":
-            action = "answer_question"
-        needs_repo_analysis = bool(needs_repo_analysis and should_accept)
+        should_accept = True
+        action = "record_feedback"
+        needs_repo_analysis = True
     elif should_accept:
         kind = "feedback"
         action = "record_feedback"

@@ -299,7 +299,7 @@ class GroupMessageService:
             mentions_bot=mentions_bot,
         )
         mention_admin_id = None
-        if reply is None and not classification.should_accept:
+        if reply is None and not classification.should_accept and classification.kind != "project_question":
             reply = await self._llm_group_chat_reply(
                 msg.group_id,
                 conversation_key,
