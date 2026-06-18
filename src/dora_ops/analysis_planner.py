@@ -92,7 +92,8 @@ async def plan_feedback_analysis_with_llm(
                         "2. 应该分析哪个仓库。\n"
                         "3. 给 opencode 的明确任务是什么。\n"
                         "不要把原始聊天流水复制进 analysis_task；只输出整理后的具体任务。\n"
-                        "如果上下文显示用户只是在闲聊、调侃、缺少可分析目标，返回 should_create_analysis=false。"
+                        "如果第一阶段已经给出 project 且 needs_repo_analysis=true，并且消息里有明确技术对象、源码对象、构建/运行对象、工具调用/并发对象、报错或变更查询，默认必须创建仓库分析任务。\n"
+                        "只有上下文明确显示用户只是在闲聊、调侃，或本轮只是“要不要跑仓库分析”这类没有具体技术目标的泛追问时，才返回 should_create_analysis=false。"
                     ),
                 },
                 {
@@ -157,6 +158,8 @@ def _analysis_plan_from_mapping(
     should_create = bool(value.get("should_create_analysis"))
     repo_key_value = value.get("repo_key")
     repo_key = str(repo_key_value) if repo_key_value in repositories else None
+    if not should_create and _should_force_analysis(classification, original_text):
+        should_create = True
     if should_create and repo_key is None:
         repo_key = _repo_key_for_project(classification.project, repositories)
     title = str(value.get("title") or classification.summary or original_text).strip()[:80]
@@ -187,3 +190,66 @@ def _repo_key_for_project(project: object, repositories: dict[str, str]) -> str:
         "Dora-SSR/YueScript": "dora_ssr",
     }.get(str(project or "").strip(), "dora_ssr")
     return mapped if mapped in repositories else next(iter(repositories))
+
+
+CONCRETE_ANALYSIS_KEYWORDS = [
+    "agent",
+    "coding agent",
+    "tool call",
+    "tool calls",
+    "tool calling",
+    "web ide",
+    "actioneditor",
+    "bodyeditor",
+    "workflow",
+    "github actions",
+    "ci",
+    "pr",
+    "issue",
+    "commit",
+    "release",
+    "tstl",
+    "wasm",
+    "parser",
+    "switch",
+    "android",
+    "ios",
+    "源码",
+    "实现",
+    "构建",
+    "运行",
+    "编译",
+    "工具",
+    "工具调用",
+    "并发",
+    "串行",
+    "队列",
+    "加锁",
+    "事件循环",
+    "渲染",
+    "物理",
+    "资源",
+    "内存",
+    "性能",
+    "模块",
+    "函数",
+    "接口",
+    "文件",
+    "报错",
+    "错误",
+    "失败",
+    "无法",
+    "不能",
+    "异常",
+    "问题",
+    "最近",
+    "提交",
+    "分支",
+]
+
+
+def _should_force_analysis(classification: Classification, original_text: str) -> bool:
+    if not classification.project or not classification.needs_repo_analysis:
+        return False
+    text = f"{original_text}\n{classification.summary}".lower()
+    return any(keyword in text for keyword in CONCRETE_ANALYSIS_KEYWORDS)

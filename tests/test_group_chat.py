@@ -296,6 +296,65 @@ async def test_group_auto_analysis_planner_can_reject_job(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_group_auto_analysis_planner_rejection_is_overridden_for_concrete_project_task(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    runtime.group_chat.classifier_client = FakeClassifierClient(
+        {
+            "should_accept": True,
+            "kind": "project_question",
+            "action": "record_feedback",
+            "project": "Dora-SSR",
+            "confidence": 0.91,
+            "needs_repo_analysis": True,
+            "summary": "询问Dora coding agent如何处理并发工具调用",
+        }
+    )
+    runtime.group_chat.planner_client = FakePlannerClient(
+        {
+            "should_create_analysis": False,
+            "repo_key": None,
+            "title": "普通讨论",
+            "analysis_task": "",
+            "context_summary": "planner 误判为普通讨论。",
+            "reject_reason": "问题比较宽泛。",
+            "questions_for_user": ["请补充具体场景。"],
+            "confidence": "high",
+        }
+    )  # type: ignore[assignment]
+
+    async def fake_ensure_mirror(repo_key, repo):
+        return tmp_path
+
+    captured: dict[str, object] = {}
+
+    async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
+        captured.update(repo_key=repo_key, prompt_text=prompt_text, trigger_source=trigger_source)
+        return 456
+
+    runtime.group_chat.tracker.ensure_mirror = fake_ensure_mirror  # type: ignore[method-assign]
+    runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=789,
+            nickname="tester",
+            text="@多萝 分析一下dora coding agent 如何处理并发工具的",
+            mentions_bot=True,
+        )
+    )
+
+    assert result is not None
+    assert result.reason == "auto_accepted"
+    assert result.analysis_job_id == 456
+    assert result.accepted_for_analysis is True
+    assert captured["repo_key"] == "dora_ssr"
+    assert "coding agent" in str(captured["prompt_text"])
+
+
+@pytest.mark.asyncio
 async def test_group_ignores_unrelated_and_disabled_groups(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
