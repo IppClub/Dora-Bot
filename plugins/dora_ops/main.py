@@ -16,10 +16,11 @@ except Exception:  # pragma: no cover - lets core tests run without NcatBot inte
     registrar = None  # type: ignore[assignment]
     get_log = None  # type: ignore[assignment]
 
-from dora_ops.runtime import DoraOpsRuntime
+from dora_ops.config import repository_local_path
 from dora_ops.group_chat import DORA_PERSONA_PROMPT, GroupBufferedMessage, GroupMention, GroupMessageInput
 from dora_ops.llm import LLMError
 from dora_ops.models import JobStatus
+from dora_ops.runtime import DoraOpsRuntime
 from dora_ops.welcome import WelcomeMember
 
 
@@ -75,8 +76,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 logger.warning("skip queued feedback job with unknown repo: job=%s repo=%s", job.get("id"), repo_key)
                 continue
             try:
-                mirror = await self.runtime.tracker.ensure_mirror(repo_key, repo)
-                await self.runtime.jobs.resume_queued_feedback_analysis(job, mirror)
+                repo_path = repository_local_path(self.runtime.base_dir, repo_key, repo)
+                await self.runtime.jobs.resume_queued_feedback_analysis(job, repo_path)
                 logger.info("recovered queued feedback analysis job: job=%s repo=%s", job.get("id"), repo_key)
             except Exception:
                 logger.exception("failed to recover queued feedback analysis job: job=%s", job.get("id"))

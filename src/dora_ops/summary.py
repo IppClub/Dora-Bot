@@ -4,7 +4,7 @@ from datetime import datetime, time as dt_time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .config import BotConfig, resolve_path
+from .config import BotConfig, repository_local_path, resolve_path
 from .jobs import JobManager
 from .prompts import yesterday_progress_prompt
 from .storage import Storage
@@ -53,10 +53,7 @@ class SummaryService:
     ) -> list[tuple[str, int]]:
         created: list[tuple[str, int]] = []
         for repo_key, repo in self.config.repositories.items():
-            if repo.local_path is None:
-                raise ValueError(f"{repo_key} 缺少 repositories.{repo_key}.local_path 配置")
-            if not repo.local_path.exists():
-                raise FileNotFoundError(f"{repo_key} 本地仓库不存在：{repo.local_path}")
+            repo_path = repository_local_path(self.base_dir, repo_key, repo)
             prompt = yesterday_progress_prompt(
                 repo_name=repo.name,
                 branch=repo.default_branch,
@@ -64,7 +61,7 @@ class SummaryService:
             )
             job_id = await jobs.create_yesterday_progress_analysis(
                 repo_key,
-                repo.local_path,
+                repo_path,
                 repo.default_branch,
                 prompt,
                 triggered_by=triggered_by,

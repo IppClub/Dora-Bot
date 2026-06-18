@@ -6,7 +6,7 @@ import time
 
 from .analysis_planner import AnalysisPlan, plan_feedback_analysis_with_llm
 from .classifier import Classification, classify_text_with_llm
-from .config import BotConfig
+from .config import BotConfig, repository_local_path
 from .jobs import JobManager
 from .llm import LLMError, OpenAICompatibleChatClient
 from .prompts import feedback_analysis_prompt
@@ -164,6 +164,7 @@ class GroupMessageService:
         self.config = config
         self.storage = storage
         self.tracker = tracker
+        self.base_dir = tracker.base_dir
         self.jobs = jobs
         self.chat_client = chat_client
         self.classifier_client = classifier_client
@@ -259,13 +260,17 @@ class GroupMessageService:
         reason = "not_needed"
         if classification.needs_repo_analysis:
             if feedback_id is not None and await self._can_auto_create_analysis():
-                analysis_job_id = await self._create_feedback_analysis_job(
-                    feedback_id=feedback_id,
-                    classification=classification,
-                    text=text,
-                    group_id=msg.group_id,
-                    triggered_by=str(msg.user_id),
-                )
+                try:
+                    analysis_job_id = await self._create_feedback_analysis_job(
+                        feedback_id=feedback_id,
+                        classification=classification,
+                        text=text,
+                        group_id=msg.group_id,
+                        triggered_by=str(msg.user_id),
+                    )
+                except (FileNotFoundError, ValueError):
+                    logger.exception("failed to create automatic feedback analysis job: feedback=%s", feedback_id)
+                    analysis_job_id = None
                 if analysis_job_id is not None:
                     accepted_for_analysis = True
                     reason = "auto_accepted"
@@ -529,7 +534,7 @@ class GroupMessageService:
             return None
         repo_key = plan.repo_key or self._repo_key_for_project(classification.project)
         repo = self.config.repositories[repo_key]
-        mirror = await self.tracker.ensure_mirror(repo_key, repo)
+        repo_path = repository_local_path(self.base_dir, repo_key, repo)
         prompt = feedback_analysis_prompt(
             repo_name=repo.name,
             project=classification.project,
@@ -541,7 +546,7 @@ class GroupMessageService:
         )
         return await self.jobs.create_feedback_analysis(
             repo_key,
-            mirror,
+            repo_path,
             feedback_id,
             prompt,
             triggered_by=triggered_by,

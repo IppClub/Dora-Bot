@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 class PathsConfig(BaseModel):
     data_dir: Path = Path("data")
-    mirror_dir: Path = Path("mirrors")
     job_dir: Path = Path("jobs")
     summary_dir: Path = Path("summaries")
 
@@ -87,7 +86,6 @@ class BotConfig(BaseModel):
     def ensure_dirs(self, base_dir: Path) -> None:
         for path in [
             self.paths.data_dir,
-            self.paths.mirror_dir,
             self.paths.job_dir,
             self.paths.summary_dir,
         ]:
@@ -96,6 +94,17 @@ class BotConfig(BaseModel):
 
 def resolve_path(base_dir: Path, path: Path) -> Path:
     return path if path.is_absolute() else base_dir / path
+
+
+def repository_local_path(base_dir: Path, repo_key: str, repo: RepositoryConfig) -> Path:
+    if repo.local_path is None:
+        raise ValueError(f"{repo_key} 缺少 repositories.{repo_key}.local_path 配置")
+    path = resolve_path(base_dir, repo.local_path)
+    if not path.exists():
+        raise FileNotFoundError(f"{repo_key} 本地仓库不存在：{path}")
+    if not (path / ".git").exists():
+        raise ValueError(f"{repo_key} local_path 不是 Git 仓库：{path}")
+    return path
 
 
 def load_config(path: str | Path = "dora-bot.yaml") -> BotConfig:

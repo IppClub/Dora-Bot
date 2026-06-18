@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from .config import BotConfig, RepositoryConfig, resolve_path
+from .config import BotConfig, RepositoryConfig, repository_local_path
 from .storage import Storage
 
 
@@ -73,12 +73,12 @@ class RepoTracker:
         diff_stat = ""
 
         if changed or is_test:
-            mirror = await self.ensure_mirror(repo_key, repo)
-            await run_git(["fetch", "--prune", "--tags", "origin"], cwd=mirror)
+            repo_path = repository_local_path(self.base_dir, repo_key, repo)
+            await run_git(["fetch", "--prune", "--tags", "origin"], cwd=repo_path)
             if old_head:
-                commit_count = await self.commit_count(mirror, old_head, head)
-                changed_files = await self.changed_files(mirror, old_head, head)
-                diff_stat = await self.diff_stat(mirror, old_head, head)
+                commit_count = await self.commit_count(repo_path, old_head, head)
+                changed_files = await self.changed_files(repo_path, old_head, head)
+                diff_stat = await self.diff_stat(repo_path, old_head, head)
             change_id = await self.storage.create_repo_change(
                 repo_key,
                 old_head,
@@ -105,14 +105,6 @@ class RepoTracker:
             "changed_files": changed_files,
             "diff_stat": diff_stat,
         }
-
-    async def ensure_mirror(self, repo_key: str, repo: RepositoryConfig) -> Path:
-        mirror_root = resolve_path(self.base_dir, self.config.paths.mirror_dir)
-        mirror = mirror_root / repo_key
-        if not (mirror / ".git").exists():
-            mirror.parent.mkdir(parents=True, exist_ok=True)
-            await run_git(["clone", "--no-checkout", repo.remote, str(mirror)])
-        return mirror
 
     @staticmethod
     async def commit_count(mirror: Path, old_head: str, new_head: str) -> int:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .analysis_planner import AnalysisPlan, plan_feedback_analysis_with_llm
 from .classifier import Classification, classify_text, classify_text_with_llm
-from .config import BotConfig
+from .config import BotConfig, repository_local_path
 from .group_chat import DORA_PERSONA_PROMPT, GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
 from .llm import LLMError, OpenAICompatibleChatClient
@@ -135,7 +135,10 @@ class AdminCommands:
 
         if command == "repo-check":
             repo_key = self._repo_key(arg)
-            result = await self.tracker.check_repo(repo_key, is_test=True, triggered_by=triggered_by)
+            try:
+                result = await self.tracker.check_repo(repo_key, is_test=True, triggered_by=triggered_by)
+            except (FileNotFoundError, ValueError) as exc:
+                return f"检查仓库失败：{exc}"
             return self._repo_check_text(result)
 
         if command == "tmux":
@@ -145,7 +148,10 @@ class AdminCommands:
         if command == "opencode":
             repo_key = self._repo_key(arg)
             repo = self.config.repositories[repo_key]
-            mirror = await self.tracker.ensure_mirror(repo_key, repo)
+            try:
+                repo_path = repository_local_path(self.base_dir, repo_key, repo)
+            except (FileNotFoundError, ValueError) as exc:
+                return f"创建 opencode 测试任务失败：{exc}"
             prompt = repo_diff_prompt(
                 repo_name=repo.name,
                 old_head=None,
@@ -156,7 +162,7 @@ class AdminCommands:
             )
             job_id = await self.jobs.create_opencode_repo_analysis(
                 repo_key,
-                mirror,
+                repo_path,
                 None,
                 prompt,
                 is_test=True,
@@ -514,7 +520,10 @@ class AdminCommands:
 
         repo_key = plan.repo_key or self._repo_key_for_project(feedback.get("project"))
         repo = self.config.repositories[repo_key]
-        mirror = await self.tracker.ensure_mirror(repo_key, repo)
+        try:
+            repo_path = repository_local_path(self.base_dir, repo_key, repo)
+        except (FileNotFoundError, ValueError) as exc:
+            return f"创建仓库分析任务失败：{exc}"
         prompt = feedback_analysis_prompt(
             repo_name=repo.name,
             project=feedback.get("project"),
@@ -526,7 +535,7 @@ class AdminCommands:
         )
         job_id = await self.jobs.create_feedback_analysis(
             repo_key,
-            mirror,
+            repo_path,
             target_id,
             prompt,
             triggered_by=str(user_id),

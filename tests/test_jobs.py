@@ -10,7 +10,6 @@ from dora_ops.runtime import DoraOpsRuntime
 CONFIG = """
 paths:
   data_dir: data
-  mirror_dir: mirrors
   job_dir: jobs
   summary_dir: summaries
 repositories:

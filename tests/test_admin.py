@@ -22,7 +22,6 @@ DoraOpsPlugin = plugin_module.DoraOpsPlugin
 CONFIG = """
 paths:
   data_dir: data
-  mirror_dir: mirrors
   job_dir: jobs
   summary_dir: summaries
 admin:

@@ -126,10 +126,10 @@ When group chat records a feedback item that needs deeper repository analysis, i
 /reject feedback 12
 ```
 
-Approving a feedback item creates a tmux/opencode job against the corresponding repository mirror.
+Approving a feedback item creates a tmux/opencode job in the corresponding configured `local_path`.
 The group acknowledgement mentions the first configured admin QQ via NcatBot's `post_group_msg(..., at=<qq>)` helper.
 
-Daily project progress reports run at `scheduler.daily_summary_time`, which defaults to `08:00`. The report jobs use the configured working repositories directly:
+All repository analysis jobs use the configured working repositories directly. Daily project progress reports run at `scheduler.daily_summary_time`, which defaults to `08:00`:
 
 ```yaml
 repositories:

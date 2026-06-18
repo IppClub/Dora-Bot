@@ -9,7 +9,6 @@ from dora_ops.runtime import DoraOpsRuntime
 CONFIG = """
 paths:
   data_dir: data
-  mirror_dir: mirrors
   job_dir: jobs
   summary_dir: summaries
 admin:
@@ -25,12 +24,14 @@ repositories:
   dora_ssr:
     name: Dora SSR
     remote: https://gitcode.com/ippclub/Dora-SSR.git
+    local_path: .
     default_branch: main
     watch_tags: true
     watch_paths: []
   yuescript:
     name: YueScript
     remote: https://gitcode.com/ippclub/YueScript.git
+    local_path: .
     default_branch: main
     watch_tags: true
     watch_paths: []
@@ -122,12 +123,10 @@ async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_group_feedback_auto_creates_analysis_job_within_daily_limit(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
-
-    async def fake_ensure_mirror(repo_key, repo):
-        return tmp_path
 
     async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
         assert repo_key == "dora_ssr"
@@ -149,7 +148,6 @@ async def test_group_feedback_auto_creates_analysis_job_within_daily_limit(tmp_p
             trigger_source="group_auto_analysis",
         )
 
-    runtime.group_chat.tracker.ensure_mirror = fake_ensure_mirror  # type: ignore[method-assign]
     runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
 
     result = await runtime.handle_group_message(
@@ -197,6 +195,7 @@ async def test_group_feedback_falls_back_to_approval_after_daily_auto_limit(tmp_
 
 @pytest.mark.asyncio
 async def test_group_auto_analysis_planner_uses_recent_context_for_prompt(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
@@ -226,16 +225,12 @@ async def test_group_auto_analysis_planner_uses_recent_context_for_prompt(tmp_pa
     )
     runtime.group_chat.planner_client = planner  # type: ignore[assignment]
 
-    async def fake_ensure_mirror(repo_key, repo):
-        return tmp_path
-
     captured: dict[str, object] = {}
 
     async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
         captured.update(repo_key=repo_key, prompt_text=prompt_text, trigger_source=trigger_source)
         return 123
 
-    runtime.group_chat.tracker.ensure_mirror = fake_ensure_mirror  # type: ignore[method-assign]
     runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
 
     result = await runtime.handle_group_message(
@@ -297,6 +292,7 @@ async def test_group_auto_analysis_planner_can_reject_job(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_group_auto_analysis_planner_rejection_is_overridden_for_concrete_project_task(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
@@ -324,16 +320,12 @@ async def test_group_auto_analysis_planner_rejection_is_overridden_for_concrete_
         }
     )  # type: ignore[assignment]
 
-    async def fake_ensure_mirror(repo_key, repo):
-        return tmp_path
-
     captured: dict[str, object] = {}
 
     async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
         captured.update(repo_key=repo_key, prompt_text=prompt_text, trigger_source=trigger_source)
         return 456
 
-    runtime.group_chat.tracker.ensure_mirror = fake_ensure_mirror  # type: ignore[method-assign]
     runtime.group_chat.jobs.create_feedback_analysis = fake_create_feedback_analysis  # type: ignore[method-assign]
 
     result = await runtime.handle_group_message(
