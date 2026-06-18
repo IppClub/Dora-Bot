@@ -5,6 +5,7 @@ class FakeToolClient:
     def __init__(self, result: dict[str, object] | None = None):
         self.tool = None
         self.tool_name = ""
+        self.calls = 0
         self.result = result or {
             "should_accept": False,
             "kind": "project_question",
@@ -15,6 +16,7 @@ class FakeToolClient:
         }
 
     async def complete_tool_call(self, messages, *, tool, tool_name):
+        self.calls += 1
         self.tool = tool
         self.tool_name = tool_name
         return self.result
@@ -108,18 +110,30 @@ def test_classify_generic_technical_topic_does_not_infer_project() -> None:
     assert result.needs_repo_analysis is False
 
 
-async def test_llm_classifier_uses_function_calling() -> None:
+async def test_llm_classifier_trusts_repo_analysis_when_keywords_miss() -> None:
     client = FakeToolClient()
 
     result = await classify_text_with_llm("这个帧管线怎么拆", client)  # type: ignore[arg-type]
 
     assert client.tool == CLASSIFY_MESSAGE_TOOL
     assert client.tool_name == "classify_message"
-    assert result.should_accept is False
-    assert result.kind == "chat"
-    assert result.project is None
-    assert result.action == "ignore"
-    assert result.needs_repo_analysis is False
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.project == "Dora-SSR"
+    assert result.action == "record_feedback"
+    assert result.needs_repo_analysis is True
+
+
+async def test_llm_classifier_skips_llm_when_keywords_trigger_repo_analysis() -> None:
+    client = FakeToolClient()
+
+    result = await classify_text_with_llm("Dora 的 CI workflow 为啥没跑", client)  # type: ignore[arg-type]
+
+    assert client.calls == 0
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.project == "Dora-SSR"
+    assert result.needs_repo_analysis is True
 
 
 async def test_llm_classifier_can_use_context_project_anchor() -> None:

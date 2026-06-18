@@ -143,6 +143,8 @@ FEEDBACK_KEYWORDS = [
     "泄漏",
     "卡死",
     "闪退",
+    "黑屏",
+    "白屏",
     "希望",
     "建议",
     "bug",
@@ -254,6 +256,17 @@ async def classify_text_with_llm(
     context_text: str = "",
     fallback: bool = True,
 ) -> Classification:
+    keyword_result = classify_text(text)
+    if keyword_result.should_accept and keyword_result.needs_repo_analysis:
+        return Classification(
+            keyword_result.should_accept,
+            keyword_result.kind,
+            keyword_result.action,
+            keyword_result.project,
+            keyword_result.confidence,
+            keyword_result.needs_repo_analysis,
+            text[:120],
+        )
     if client is None:
         return classify_text(text)
     try:
@@ -300,9 +313,7 @@ def _classification_from_mapping(value: dict[str, Any], *, original_text: str, c
     project_value = value.get("project")
     project = str(project_value) if project_value in {"Dora-SSR", "YueScript", "Dora-SSR/YueScript"} else None
     guarded_project = _project_from_text(f"{context_text}\n{original_text}".lower())
-    if project is not None and guarded_project is None:
-        project = None
-    elif project is not None and guarded_project is not None:
+    if project is not None and guarded_project is not None:
         project = guarded_project
     elif guarded_project is not None and _has_repo_analysis_signal(original_text):
         project = guarded_project

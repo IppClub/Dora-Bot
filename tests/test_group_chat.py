@@ -533,7 +533,7 @@ async def test_group_chat_llm_final_user_message_is_latest_message(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_group_chat_does_not_record_generic_project_guess(tmp_path: Path) -> None:
+async def test_group_chat_records_llm_project_analysis_even_when_keywords_miss(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
@@ -555,7 +555,13 @@ async def test_group_chat_does_not_record_generic_project_guess(tmp_path: Path) 
         GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="这个帧管线怎么拆比较稳")
     )
 
-    assert result is None
+    assert result is not None
+    assert result.reason == "manual_required"
+    assert result.feedback_id is not None
+    assert result.approval_id is not None
+    assert result.reply is None
+    assert result.classification.project == "Dora-SSR"
+    assert result.classification.needs_repo_analysis is True
     assert classifier.calls
     assert chat.calls == []
 
@@ -707,9 +713,8 @@ async def test_group_buffered_messages_are_stored_separately(tmp_path: Path) -> 
     assert result.feedback_id is not None
     assert result.approval_id is not None
     assert result.admin_notification is not None
-    assert classifier.calls
+    assert classifier.calls == []
     assert chat.calls == []
-    assert "a(QQ:789): 多萝，Dora SSR 资源释放有问题" in classifier.calls[0][1]["content"]
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "user"]
     assert "a(QQ:789)：" in recent[0]["content"]
