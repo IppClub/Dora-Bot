@@ -561,6 +561,35 @@ async def test_group_chat_routes_dora_technical_analysis_to_repo_instead_of_llm(
 
 
 @pytest.mark.asyncio
+async def test_group_chat_routes_dora_coding_agent_concurrency_to_repo_instead_of_llm(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient(["不应该直接回答"])
+    runtime.group_chat.chat_client = chat
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=789,
+            nickname="tester",
+            text="@多萝 分析一下dora coding agent 如何处理并发工具的",
+            mentions_bot=True,
+        )
+    )
+
+    assert result is not None
+    assert result.reason == "manual_required"
+    assert result.feedback_id is not None
+    assert result.approval_id is not None
+    assert result.reply is None
+    assert result.classification.project == "Dora-SSR"
+    assert result.classification.needs_repo_analysis is True
+    assert result.admin_notification is not None
+    assert chat.calls == []
+
+
+@pytest.mark.asyncio
 async def test_group_feedback_ack_takes_priority_over_llm_chat(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")

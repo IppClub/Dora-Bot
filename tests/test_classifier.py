@@ -68,6 +68,30 @@ def test_classify_dora_build_question_routes_to_repo_analysis() -> None:
     assert result.needs_repo_analysis is True
 
 
+def test_classify_dora_ci_workflow_question_routes_to_repo_analysis() -> None:
+    result = classify_text("Dora 的 CI workflow 为啥没跑")
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.project == "Dora-SSR"
+    assert result.needs_repo_analysis is True
+
+
+def test_classify_dora_coding_agent_concurrency_routes_to_repo_analysis() -> None:
+    result = classify_text("@多萝 分析一下dora coding agent 如何处理并发工具的")
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.project == "Dora-SSR"
+    assert result.needs_repo_analysis is True
+
+
+def test_classify_yue_moon_script_question_routes_to_repo_analysis() -> None:
+    result = classify_text("Yue 的 moon script 兼容逻辑在哪")
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.project == "YueScript"
+    assert result.needs_repo_analysis is True
+
+
 def test_classify_project_fault_language_routes_to_repo_analysis() -> None:
     result = classify_text("多萝，Dora SSR 资源释放有问题，场景切换后显存没下来")
     assert result.should_accept is True
@@ -114,6 +138,32 @@ async def test_llm_classifier_can_use_context_project_anchor() -> None:
         "这个要不要跑仓库分析？",
         client,  # type: ignore[arg-type]
         context_text="tester(QQ:789)：Dora SSR 的 Web IDE 创建文件后无法刷新",
+    )
+
+    assert result.should_accept is True
+    assert result.kind == "project_question"
+    assert result.project == "Dora-SSR"
+    assert result.action == "record_feedback"
+    assert result.needs_repo_analysis is True
+
+
+async def test_llm_classifier_forces_repo_analysis_for_context_followup() -> None:
+    client = FakeToolClient(
+        {
+            "should_accept": False,
+            "kind": "chat",
+            "action": "ignore",
+            "project": None,
+            "confidence": 0.95,
+            "needs_repo_analysis": False,
+            "summary": "用户询问是否需要仓库分析",
+        }
+    )
+
+    result = await classify_text_with_llm(
+        "这个问题要不要跑仓库分析？",
+        client,  # type: ignore[arg-type]
+        context_text="tester(QQ:789)：Dora SSR Web IDE 创建文件后无法刷新",
     )
 
     assert result.should_accept is True

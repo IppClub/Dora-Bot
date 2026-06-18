@@ -27,6 +27,7 @@ YUE_STRONG_KEYWORDS = [
 
 YUE_CONTEXT_KEYWORDS = [
     "yue",
+    "moon script",
     "moonscript",
     "teal",
 ]
@@ -36,6 +37,7 @@ PROJECT_CONTEXT_KEYWORDS = [
     "actioneditor",
     "bodyeditor",
     "android webview",
+    "moon script",
     "moonscript",
     "teal",
     "pr",
@@ -47,6 +49,17 @@ PROJECT_CONTEXT_KEYWORDS = [
     "commit",
     "commits",
     "branch",
+    "ci",
+    "workflow",
+    "workflows",
+    "github actions",
+    "action",
+    "actions",
+    "agent",
+    "coding agent",
+    "tool call",
+    "tool calls",
+    "tool calling",
     "release",
     "tag",
     "仓库",
@@ -54,6 +67,19 @@ PROJECT_CONTEXT_KEYWORDS = [
     "提交",
     "分支",
     "合并",
+    "工作流",
+    "流水线",
+    "持续集成",
+    "工具",
+    "工具调用",
+    "并发",
+    "串行",
+    "队列",
+    "加锁",
+    "锁",
+    "事件循环",
+    "消息",
+    "调度",
     "拉取请求",
     "议题",
     "最近",
@@ -126,6 +152,23 @@ FEEDBACK_KEYWORDS = [
     "broken",
     "wrong",
     "leak",
+]
+
+REPO_ANALYSIS_KEYWORDS = [
+    "仓库分析",
+    "跑仓库",
+    "看仓库",
+    "查仓库",
+    "检查仓库",
+    "分析仓库",
+    "分析一下",
+    "帮忙分析",
+    "定位",
+    "查一下",
+    "看一下",
+    "在哪",
+    "哪里",
+    "哪个模块",
 ]
 
 
@@ -222,7 +265,7 @@ async def classify_text_with_llm(
                         "你是 Dora Bot 的消息判断器，必须调用 classify_message 工具，不要用正文回答。\n"
                         "判断用户消息是否需要解释技术问题、是否应记录为 Dora SSR/YueScript 的有效反馈、是否需要仓库分析。\n"
                         "should_accept 表示是否应该记录并交给管理员处理，不表示是否需要回复。\n"
-                        "只有消息明确提到 Dora SSR、Dora-SSR、YueScript、dora-cli，或上下文同时出现 Dora/Yue 与 Web IDE、ActionEditor、BodyEditor、PR、issue、commit、release、仓库、源码、实现、构建、运行、渲染、性能、TSTL、WASM 等项目/代码/技术分析语境时，才可以设置 project。\n"
+                        "只有消息明确提到 Dora SSR、Dora-SSR、YueScript、dora-cli，或上下文同时出现 Dora/Yue 与 Web IDE、ActionEditor、BodyEditor、coding agent、tool call、并发工具调用、PR、issue、commit、CI、workflow、GitHub Actions、release、仓库、源码、实现、构建、运行、渲染、性能、TSTL、WASM 等项目/代码/技术分析语境时，才可以设置 project。\n"
                         "不要把普通游戏引擎、渲染、物理、性能、WASM、parser、switch、Android/iOS/macOS/Windows 构建等通用技术话题脑补成 Dora SSR/YueScript。\n"
                         "普通技术讨论和没有明确项目锚点的问题用 kind=chat、should_accept=false；如果需要回复可用 action=reply 或 answer_question，但不要记录。\n"
                         "只要有明确项目锚点，并且在问技术分析、源码实现、构建运行、最近变更、架构设计、性能、渲染、资源、复现、定位、原因或检查仓库，就用 kind=project_question、action=record_feedback、should_accept=true、needs_repo_analysis=true，不要直接回答。\n"
@@ -261,6 +304,9 @@ def _classification_from_mapping(value: dict[str, Any], *, original_text: str, c
         project = None
     elif project is not None and guarded_project is not None:
         project = guarded_project
+    elif guarded_project is not None and _has_repo_analysis_signal(original_text):
+        project = guarded_project
+        kind = "project_question"
     should_accept = bool(value.get("should_accept"))
     needs_repo_analysis = bool(value.get("needs_repo_analysis"))
     try:
@@ -320,3 +366,8 @@ def _project_from_text(lowered: str) -> str | None:
 def _has_feedback_signal(text: str) -> bool:
     lowered = text.lower()
     return any(keyword in lowered for keyword in FEEDBACK_KEYWORDS)
+
+
+def _has_repo_analysis_signal(text: str) -> bool:
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in REPO_ANALYSIS_KEYWORDS)
