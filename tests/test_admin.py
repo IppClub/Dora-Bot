@@ -670,7 +670,7 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
     assert "/approve feedback <id>" in system_prompt
     assert "/test daily-summary --progress" in system_prompt
     assert "# 能力触发规则" in system_prompt
-    assert "普通技术讨论可以简短回答，不要强行记录为反馈" in system_prompt
+    assert "应交给仓库分析流程，不要用聊天模型直接回答" in system_prompt
     assert "# 输出长度规则" in system_prompt
     assert "闲聊、问候、调侃、普通接话：只回复一句，尽量不超过 15 个字" in system_prompt
     assert "# 私聊任务规则" in system_prompt

@@ -58,6 +58,46 @@ PROJECT_CONTEXT_KEYWORDS = [
     "议题",
     "最近",
     "哪些",
+    "技术",
+    "分析",
+    "定位",
+    "源码",
+    "实现",
+    "架构",
+    "模块",
+    "函数",
+    "接口",
+    "文件",
+    "编译",
+    "构建",
+    "运行",
+    "启动",
+    "加载",
+    "编辑器",
+    "脚本",
+    "引擎",
+    "渲染",
+    "物理",
+    "性能",
+    "内存",
+    "资源",
+    "生命周期",
+    "原因",
+    "为什么",
+    "怎么",
+    "如何",
+    "tstl",
+    "lua",
+    "tsx",
+    "typescript",
+    "wasm",
+    "parser",
+    "switch",
+    "android",
+    "ios",
+    "macos",
+    "windows",
+    "webview",
 ]
 
 FEEDBACK_KEYWORDS = [
@@ -182,12 +222,12 @@ async def classify_text_with_llm(
                         "你是 Dora Bot 的消息判断器，必须调用 classify_message 工具，不要用正文回答。\n"
                         "判断用户消息是否需要解释技术问题、是否应记录为 Dora SSR/YueScript 的有效反馈、是否需要仓库分析。\n"
                         "should_accept 表示是否应该记录并交给管理员处理，不表示是否需要回复。\n"
-                        "只有消息明确提到 Dora SSR、Dora-SSR、YueScript、dora-cli，或上下文同时出现 Dora/Yue 与 Web IDE、ActionEditor、BodyEditor、PR、issue、commit、release、仓库等项目/代码仓库语境时，才可以设置 project。\n"
+                        "只有消息明确提到 Dora SSR、Dora-SSR、YueScript、dora-cli，或上下文同时出现 Dora/Yue 与 Web IDE、ActionEditor、BodyEditor、PR、issue、commit、release、仓库、源码、实现、构建、运行、渲染、性能、TSTL、WASM 等项目/代码/技术分析语境时，才可以设置 project。\n"
                         "不要把普通游戏引擎、渲染、物理、性能、WASM、parser、switch、Android/iOS/macOS/Windows 构建等通用技术话题脑补成 Dora SSR/YueScript。\n"
                         "普通技术讨论和没有明确项目锚点的问题用 kind=chat、should_accept=false；如果需要回复可用 action=reply 或 answer_question，但不要记录。\n"
-                        "明确项目问题但只是问概念或设计建议时，可用 kind=project_question、action=answer_question、should_accept=false、needs_repo_analysis=false。\n"
-                        "只有能明确关联到 Dora SSR/YueScript 的报错、崩溃、失败、bug、建议、希望、复现或明确要求检查仓库时，才用 should_accept=true。\n"
-                        "needs_repo_analysis 只在需要读仓库、定位实现、复现 bug 或用户明确要求仓库分析时为 true。"
+                        "只要有明确项目锚点，并且在问技术分析、源码实现、构建运行、最近变更、架构设计、性能、渲染、资源、复现、定位、原因或检查仓库，就用 kind=project_question、action=record_feedback、should_accept=true、needs_repo_analysis=true，不要直接回答。\n"
+                        "明确关联到 Dora SSR/YueScript 的报错、崩溃、失败、bug、建议、希望、复现或仓库查询也必须 should_accept=true。\n"
+                        "needs_repo_analysis 对明确项目技术问题默认为 true；只有问候、闲聊、机器人使用方式或完全不需要读项目上下文的问题才为 false。"
                         "action 表示群聊行为：普通聊天和不明确内容用 ignore；明确点名闲聊可用 reply；"
                         "有效反馈和项目问题用 record_feedback。"
                     ),

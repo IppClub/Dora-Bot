@@ -380,7 +380,7 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert "/approve feedback <id>" not in system_prompt
     assert "不能假装已经执行命令" in system_prompt
     assert "# 能力触发规则" in system_prompt
-    assert "普通技术讨论可以简短回答，不要强行记录为反馈" in system_prompt
+    assert "应交给仓库分析流程，不要用聊天模型直接回答" in system_prompt
     assert "平台" in system_prompt
     assert "报错全文" in system_prompt
     assert "相关仓库或最小示例" in system_prompt
@@ -534,6 +534,29 @@ async def test_group_chat_records_explicit_project_question_instead_of_llm_reply
     assert result.reply is None
     assert result.admin_notification is not None
     assert "群聊反馈已记录：#" in result.admin_notification
+    assert chat.calls == []
+
+
+@pytest.mark.asyncio
+async def test_group_chat_routes_dora_technical_analysis_to_repo_instead_of_llm(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient(["不应该直接回答"])
+    runtime.group_chat.chat_client = chat
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=789, nickname="tester", text="多萝，分析一下 Dora 的渲染管线怎么实现")
+    )
+
+    assert result is not None
+    assert result.reason == "manual_required"
+    assert result.feedback_id is not None
+    assert result.approval_id is not None
+    assert result.reply is None
+    assert result.classification.project == "Dora-SSR"
+    assert result.classification.needs_repo_analysis is True
+    assert result.admin_notification is not None
     assert chat.calls == []
 
 
