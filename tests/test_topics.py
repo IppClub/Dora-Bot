@@ -20,11 +20,7 @@ async def test_daily_review_pushes_design_once_for_unchanged_discussion(tmp_path
     _git("init", "--initial-branch=main", str(worktree), cwd=tmp_path)
     _git("config", "user.name", "Dora Bot", cwd=worktree)
     _git("config", "user.email", "dora@example.invalid", cwd=worktree)
-    (worktree / ".gitkeep").write_text("", encoding="utf-8")
-    _git("add", ".gitkeep", cwd=worktree)
-    _git("commit", "-m", "init", cwd=worktree)
     _git("remote", "add", "origin", str(remote), cwd=worktree)
-    _git("push", "-u", "origin", "main", cwd=worktree)
 
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(
@@ -61,7 +57,7 @@ topic_archive:
     assert (worktree / "topics" / "ds1.md").exists()
     design = (worktree / "designs" / "ds1.md").read_text(encoding="utf-8")
     assert "讨论更新至" in design
-    assert _git_log_count(worktree) == 2
+    assert _git_log_count(worktree) == 1
 
 
 def _git_log_count(worktree: Path) -> int:

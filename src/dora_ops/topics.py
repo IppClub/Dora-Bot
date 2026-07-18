@@ -129,8 +129,14 @@ class TopicArchive:
                 raise ValueError(f"话题归档仓库当前分支不是 {branch}")
             if await self._git("status", "--porcelain"):
                 raise ValueError("话题归档仓库工作区不干净")
-            await self._git("fetch", "origin", branch)
-            await self._git("pull", "--ff-only", "origin", branch)
+            try:
+                await self._git("fetch", "origin", branch)
+                await self._git("pull", "--ff-only", "origin", branch)
+            except RuntimeError as exc:
+                # A newly-created remote has no branch to fetch yet. It is safe
+                # to create the first commit locally and establish it by push.
+                if "couldn't find remote ref" not in str(exc):
+                    raise
             self._write(root / topic_path, topic_markdown)
             self._write(root / design_path, design_markdown)
             await self._git("add", "--", str(topic_path), str(design_path))

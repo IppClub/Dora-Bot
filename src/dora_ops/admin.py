@@ -87,7 +87,7 @@ class AdminCommands:
         if text.startswith("/approve"):
             try:
                 return await self._handle_approve(text, user_id=user_id)
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 return str(exc)
         if text.startswith("/reject"):
             try:
