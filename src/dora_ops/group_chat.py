@@ -228,7 +228,7 @@ class GroupMessageService:
                         continue
                     discussion_reply = await self._topic_discussion_reply(ticket, created=False)
                     await self.topics.record_bot_reply(ticket, discussion_reply)
-                    replies.append(f"{code}：{discussion_reply}")
+                    replies.append(discussion_reply)
                 reply = "\n".join(replies) or f"已归集 {'、'.join(recorded_codes)} 的讨论；明天会整理进设计文稿。"
                 await self.storage.append_chat_message(conversation_key, "assistant", reply)
                 return GroupMessageResult(
@@ -478,7 +478,7 @@ class GroupMessageService:
         if self.chat_client is None:
             if created:
                 return f"我会跟进这件事；后续讨论会继续归到同一线程。\n\n{ticket_notice}"
-            return f"已归集到 {code}。我会结合当前讨论继续跟进，明天整理进设计文稿。"
+            return f"我会结合当前讨论继续跟进，明天整理进设计文稿。\n\n〔{code}〕"
         transcript = "\n".join(
             f"{'多萝' if row.get('role') == 'assistant' else (row['nickname'] or row['user_id'])}：{row['content']}"
             for row in context
@@ -503,8 +503,8 @@ class GroupMessageService:
             logger.info("topic discussion llm reply failed: ticket=%s error=%s", code, exc)
             reply = ""
         if not reply:
-            reply = f"我已经记下这点，{code} 会继续按讨论推进。"
-        return f"{reply}\n\n{ticket_notice}" if created else reply
+            reply = "我已经记下这点，会继续按讨论推进。"
+        return f"{reply}\n\n{ticket_notice}" if created else f"{reply}\n\n〔{code}〕"
 
     async def _llm_group_chat_reply(
         self,

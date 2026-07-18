@@ -205,7 +205,9 @@ async def test_topic_thread_records_user_and_bot_replies_with_context(tmp_path: 
     assert [row["role"] for row in thread] == ["user", "assistant", "user", "assistant"]
     assert thread[1]["content"].startswith("先确认归档的目标仓库。")
     assert "已建立工单 ds1" in thread[1]["content"]
-    assert thread[-1]["content"] == "那就按最新消息 ID 去重。"
+    assert thread[-1]["content"] == "那就按最新消息 ID 去重。\n\n〔ds1〕"
+    assert (followup.reply or "").startswith("那就按最新消息 ID 去重。")
+    assert (followup.reply or "").endswith("〔ds1〕")
     assert len(chat.calls) == 2
     assert "先确认归档的目标仓库。" in chat.calls[-1][-1]["content"]
 
