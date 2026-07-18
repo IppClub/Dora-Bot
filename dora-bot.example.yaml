@@ -108,4 +108,6 @@ topic_archive:
   timezone: Asia/Shanghai
   daily_review_24h_limit: 60
   discussion_context_rounds: 20
+  # OpenCode runs in the target source repository and writes designs/dsN.md.
+  design_generator: opencode
   public_url: https://atomgit.com/ippclub/dora-topic

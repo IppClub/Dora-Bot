@@ -39,7 +39,7 @@ ds1 已归集，明天会基于今天的讨论生成设计分析稿。
 
 ### 2.3 T+1 日审阅
 
-调度器每天在 `review_time` 执行：对每个开放工单，审阅**昨天**带编号的新增讨论，结合上一版设计稿更新 `designs/ds1.md`。例如 7 月 17 日的讨论由 7 月 18 日生成或修订设计稿。
+调度器每天在 `review_time` 执行：对每个开放工单，审阅**昨天**带编号的新增讨论，结合上一版设计稿更新 `designs/ds1.md`。例如 7 月 17 日的讨论由 7 月 18 日生成或修订设计稿。默认由 Bot 在目标项目的本地仓库中启动 OpenCode：OpenCode 读取归档仓库的 `topics/ds1.md`，分析真实源码后只写回归档仓库的 `designs/ds1.md`；Bot 负责校验、提交和推送。
 
 仅在以下条件同时成立时更新文稿：
 
@@ -79,6 +79,7 @@ topic_archive:
   review_time: "08:30"
   timezone: Asia/Shanghai
   daily_review_24h_limit: 60
+  design_generator: opencode # 可为 fallback，用于没有 OpenCode 的测试/降级环境
   public_url: https://atomgit.com/ippclub/dora-topic
 ```
 
@@ -148,10 +149,10 @@ create table topic_sync(
 
 - `topic_classifier.py`：判定 `issue`、`feature_design`、`not_topic`，并输出标题、项目和置信度。
 - `topic_service.py`：创建工单、抽取编号、保存用户/Bot 线程消息、权限和状态判断。
-- `topic_review.py`：选择昨天有新增讨论的工单，防重、调度和失败重试。
-- `topic_renderer.py`：调用 LLM 生成结构化的分析设计内容，渲染确定性的 Markdown。
-- `topic_archive.py`：唯一允许触碰归档 Git 工作区的组件，串行执行审阅稿写入、提交与推送。
-- `prompts.py`：增加工单讨论与 T+1 设计审阅 prompt；讨论回复使用同一工单最近 20 轮线程，日审输入仅包含该工单新增消息、必要的历史结论和旧设计稿，不混入全群 `chat_message`。
+- `topic_review.py`：选择昨天有新增讨论的工单，防重、调度和失败重试；默认提交 OpenCode 作业。
+- `topic_renderer.py`：在 `fallback` 模式调用 LLM 生成结构化的分析设计内容，渲染确定性的 Markdown。
+- `topic_archive.py`：唯一允许触碰归档 Git 工作区的组件，串行写入 topic、校验 OpenCode 仅写入目标设计稿、提交与推送。
+- `prompts.py`：增加工单讨论与 T+1 设计审阅 prompt；讨论回复使用同一工单最近 20 轮线程。OpenCode 日审 prompt 只给出对应 `topics/dsN.md` 的绝对路径与 `designs/dsN.md` 输出路径，要求基于本地项目仓库分析，不混入全群 `chat_message`。
 
 在 `GroupMessageService.handle()` 中的顺序：
 
@@ -202,14 +203,15 @@ LLM 必须返回受 schema 约束的 JSON（问题定义、结论、方案、取
 日审阅由 `TopicArchive` 的单一 `asyncio.Lock` 串行化。每一次成功审阅：
 
 1. 查询昨天的同工单消息，并检查 `last_reviewed_message_id` 与 `last_reviewed_for_date`；无新消息或已成功审阅则退出；
-2. 验证归档仓库干净，执行 `git fetch origin main` 与快进式 `git pull --ff-only origin main`；
-3. 读取 `topics/dsN.md`、旧 `designs/dsN.md` 和选定消息，调用 renderer，原子写入设计稿；
-4. `git add -- topics/dsN.md designs/dsN.md`，只允许这两个目标路径进入暂存区；
-5. `git commit -m "docs(topic): review dsN for YYYY-MM-DD"`；
-6. `git push origin main`；
-7. 仅在推送成功后更新 `last_reviewed_message_id`、`last_reviewed_for_date`、`last_design_updated_at` 和 `last_review_commit`。
+2. 验证归档仓库的 origin、分支和工作区；干净时执行 `git fetch origin main` 与快进式 `git pull --ff-only origin main`；
+3. 写入完整的 `topics/dsN.md`，在目标项目本地仓库启动 OpenCode。作业可读项目源码和 topic 文件，但 prompt 禁止修改源码或执行 Git 写入，只允许写入指定的 `designs/dsN.md`；
+4. OpenCode 成功后，验证归档工作区仅变更 `topics/dsN.md` 与 `designs/dsN.md`，且设计文档非空；
+5. `git add -- topics/dsN.md designs/dsN.md`，只允许这两个目标路径进入暂存区；
+6. `git commit -m "docs(topic): review dsN for YYYY-MM-DD"`；
+7. `git push origin main`；
+8. 仅在推送成功后更新 `last_reviewed_message_id`、`last_reviewed_for_date`、`last_design_updated_at` 和 `last_review_commit`。
 
-若拉取冲突、工作区脏、push 失败或 LLM 失败，保留原始消息、写入 `topic_sync.error`、向管理员告警；不更新审阅游标，因此下次可安全重试。不重置、不强推、不覆盖远端文档。
+若拉取冲突、工作区脏、push 失败或 OpenCode/LLM 失败，保留原始消息、写入 `topic_sync.error`、向管理员告警；不更新审阅游标，因此下次可安全重试。不重置、不强推、不覆盖远端文档。
 
 ## 8. 实施阶段与验收
 
@@ -220,8 +222,8 @@ LLM 必须返回受 schema 约束的 JSON（问题定义、结论、方案、取
 
 ### Phase 2：T+1 设计审阅与渲染
 
-- 受约束 LLM prompt、确定性 Markdown renderer、按昨日消息的增量上下文裁剪和调度器接入。
-- 测试：未知信息不伪造、昨天没有新消息时零 LLM 调用/零 Git 写入、同一天重复运行不更新、重试不重复摘要。
+- 受约束 OpenCode prompt、归档路径白名单、在目标项目仓库执行的作业编排，以及 `fallback` 的确定性 Markdown renderer。
+- 测试：OpenCode 收到正确的项目路径与 topic 文档、只能写指定设计稿、昨天没有新消息时零作业/零 Git 写入、同一天重复运行不更新、重试不重复摘要。
 
 ### Phase 3：AtomGit 归档
 

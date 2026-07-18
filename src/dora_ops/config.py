@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -88,6 +88,7 @@ class TopicArchiveConfig(BaseModel):
     timezone: str = "Asia/Shanghai"
     daily_review_24h_limit: int = Field(default=60, ge=1)
     discussion_context_rounds: int = Field(default=20, ge=1, le=100)
+    design_generator: Literal["opencode", "fallback"] = "opencode"
     public_url: str = ""
 
 

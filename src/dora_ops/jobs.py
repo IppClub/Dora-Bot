@@ -120,6 +120,54 @@ class JobManager:
         asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
         return job_id
 
+    async def create_topic_design(
+        self,
+        *,
+        repo_key: str,
+        repo_path: Path,
+        ticket_id: int,
+        prompt_text: str,
+    ) -> int:
+        job_dir = self._next_job_dir("topic_design")
+        prompt = job_dir / "prompt.md"
+        output = job_dir / "output.log"
+        error = job_dir / "error.log"
+        exit_code = job_dir / "exit_code"
+        done = job_dir / "done"
+        prompt.write_text(prompt_text, encoding="utf-8")
+        session = f"dora_job_{int(time.time())}_{repo_key}_topic_{ticket_id}"
+        job_id = await self.storage.create_job(
+            kind="topic_design",
+            target_type="topic_ticket",
+            target_id=ticket_id,
+            tmux_session=session,
+            prompt_path=prompt,
+            output_path=output,
+            error_path=error,
+            exit_code_path=exit_code,
+            done_path=done,
+            trigger_source="topic_review",
+        )
+        command = f"cd {shlex.quote(str(repo_path))} && {self.config.jobs.opencode_command} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        await self._start_tmux_job(job_id, session, command, error, exit_code, done)
+        return job_id
+
+    async def wait_for_job(self, job_id: int) -> dict[str, object]:
+        deadline = time.monotonic() + self.config.jobs.max_runtime_seconds
+        while time.monotonic() < deadline:
+            job = await self.storage.get_job(job_id)
+            if job is None:
+                raise RuntimeError(f"job #{job_id} not found")
+            status = await self.reconcile_job(job)
+            if status in {JobStatus.SUCCEEDED, JobStatus.FAILED}:
+                finished = await self.storage.get_job(job_id)
+                assert finished is not None
+                if status == JobStatus.FAILED:
+                    raise RuntimeError(str(finished.get("error") or f"topic design job #{job_id} failed"))
+                return finished
+            await asyncio.sleep(1)
+        raise RuntimeError(f"topic design job #{job_id} timed out")
+
     async def resume_queued_feedback_analysis(self, job: dict[str, object], repo_path: Path) -> None:
         job_id = int(job["id"])
         if str(job.get("kind") or "") != "feedback_analysis":

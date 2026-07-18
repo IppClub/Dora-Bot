@@ -90,6 +90,41 @@ Inspect the repository only as needed and return JSON only:
 """
 
 
+def topic_design_prompt(
+    *,
+    code: str,
+    title: str,
+    topic_path: str,
+    design_path: str,
+    review_date: str,
+) -> str:
+    return f"""You are preparing the design document for Dora topic ticket {code}: {title}.
+
+Your current working directory is the target source repository. Analyze its real code, APIs, history and conventions as needed.
+
+Read the complete ticket discussion from:
+{topic_path}
+
+Write the final Markdown design document directly to this exact path:
+{design_path}
+
+The document is for review date {review_date}. It must use these sections:
+- 问题定义与目标
+- 现有项目分析
+- 方案与取舍
+- 建议的实现拆分
+- 风险与验证
+- 待确认问题
+- 本次讨论结论
+
+Rules:
+- Treat the ticket discussion as user intent, and distinguish it from facts you verified in the repository.
+- Do not invent code paths, APIs, results, or conclusions.
+- Do not modify any file in the source repository. Do not run Git write commands.
+- Only write the specified design Markdown file; the Bot will validate, commit and push the archive repository.
+"""
+
+
 def yesterday_progress_prompt(*, repo_name: str, branch: str, timezone: str) -> str:
     return f"""You are preparing a daily maintainer progress report for {repo_name}.
 

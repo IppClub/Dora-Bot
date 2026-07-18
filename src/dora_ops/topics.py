@@ -7,8 +7,10 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .config import BotConfig, resolve_path
+from .config import BotConfig, repository_local_path, resolve_path
+from .jobs import JobManager
 from .llm import LLMError, OpenAICompatibleChatClient
+from .prompts import topic_design_prompt
 from .storage import Storage
 
 
@@ -155,6 +157,48 @@ class TopicArchive:
                 await self._git("push", "origin", branch)
             return await self._git("rev-parse", "HEAD")
 
+    async def prepare_topic(self, topic_path: Path, topic_markdown: str) -> None:
+        async with self._lock:
+            root = self.root
+            if not (root / ".git").exists():
+                raise ValueError(f"话题归档仓库不存在或不是 Git 仓库：{root}")
+            configured_remote = self.config.topic_archive.repository.remote.strip()
+            actual_remote = await self._git("remote", "get-url", "origin")
+            if configured_remote and actual_remote != configured_remote:
+                raise ValueError("话题归档仓库 origin 与配置不一致")
+            branch = self.config.topic_archive.repository.branch
+            current_branch = await self._git("branch", "--show-current")
+            if current_branch != branch:
+                raise ValueError(f"话题归档仓库当前分支不是 {branch}")
+            dirty = await self._git("status", "--porcelain", "--untracked-files=all")
+            design_path = self.config.topic_archive.design_dir / topic_path.name
+            allowed = {str(topic_path), str(design_path)}
+            if dirty and any(line[3:] not in allowed for line in dirty.splitlines()):
+                raise ValueError("话题归档仓库工作区含有非本工单变更")
+            if not dirty:
+                try:
+                    await self._git("fetch", "origin", branch)
+                    await self._git("pull", "--ff-only", "origin", branch)
+                except RuntimeError as exc:
+                    if "couldn't find remote ref" not in str(exc):
+                        raise
+            self._write(root / topic_path, topic_markdown)
+
+    async def commit_prepared_documents(self, *, topic_path: Path, design_path: Path, commit_message: str) -> str:
+        async with self._lock:
+            root = self.root
+            if not (root / design_path).is_file() or not (root / design_path).read_text(encoding="utf-8").strip():
+                raise ValueError("OpenCode 未写入设计文稿")
+            dirty = await self._git("status", "--porcelain", "--untracked-files=all")
+            allowed = {str(topic_path), str(design_path)}
+            if any(line[3:] not in allowed for line in dirty.splitlines()):
+                raise ValueError("话题归档仓库工作区含有未声明变更")
+            await self._git("add", "--", str(topic_path), str(design_path))
+            if await self._git("diff", "--cached", "--name-only"):
+                await self._git("commit", "-m", commit_message)
+                await self._git("push", "origin", self.config.topic_archive.repository.branch)
+            return await self._git("rev-parse", "HEAD")
+
     @staticmethod
     def _write(path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,10 +214,12 @@ class TopicReviewService:
         config: BotConfig,
         storage: Storage,
         chat_client: OpenAICompatibleChatClient | None = None,
+        jobs: JobManager | None = None,
     ):
         self.config = config
         self.storage = storage
         self.chat_client = chat_client
+        self.jobs = jobs
         self.archive = TopicArchive(base_dir, config)
 
     async def review_yesterday(self) -> list[str]:
@@ -215,7 +261,6 @@ class TopicReviewService:
         code = str(ticket["code"])
         design_path = self.config.topic_archive.design_dir / f"{code}.md"
         topic_path = self.config.topic_archive.docs_dir / f"{code}.md"
-        design = await self._render_design(ticket, messages, design_path, zone)
         thread = await self.storage.list_topic_messages(int(ticket["id"]))
         topic = self._render_topic(ticket, design_path, thread)
         sync_id = await self.storage.create_topic_sync(
@@ -223,16 +268,52 @@ class TopicReviewService:
             from_message_id=int(messages[0]["id"]), to_message_id=int(messages[-1]["id"]), artifact_path=str(design_path),
         )
         try:
-            commit = await self.archive.verify_and_update(
-                topic_path=topic_path, topic_markdown=topic, design_path=design_path, design_markdown=design,
-                commit_message=f"docs(topic): review {code} for {review_date.isoformat()}",
-            )
+            commit_message = f"docs(topic): review {code} for {review_date.isoformat()}"
+            if self.config.topic_archive.design_generator == "opencode":
+                commit = await self._generate_with_opencode(ticket, topic_path, topic, design_path, review_date, commit_message)
+            else:
+                design = await self._render_design(ticket, messages, design_path, zone)
+                commit = await self.archive.verify_and_update(
+                    topic_path=topic_path, topic_markdown=topic, design_path=design_path, design_markdown=design,
+                    commit_message=commit_message,
+                )
         except Exception as exc:
             await self.storage.finish_topic_sync(sync_id, status="failed", error=str(exc)[:2000])
             raise
         await self.storage.finish_topic_sync(sync_id, status="succeeded", commit_sha=commit)
         await self.storage.mark_topic_reviewed(
             ticket_id=int(ticket["id"]), review_date=review_date.isoformat(), last_message_id=int(messages[-1]["id"]), commit_sha=commit,
+        )
+
+    async def _generate_with_opencode(
+        self,
+        ticket: dict[str, Any],
+        topic_path: Path,
+        topic: str,
+        design_path: Path,
+        review_date: date,
+        commit_message: str,
+    ) -> str:
+        if self.jobs is None:
+            raise RuntimeError("OpenCode 话题设计任务服务不可用")
+        project = str(ticket.get("project") or "")
+        repo_key = "yuescript" if "yue" in project.lower() else "dora_ssr"
+        repo = self.config.repositories.get(repo_key)
+        if repo is None:
+            raise RuntimeError(f"工单项目未配置本地仓库：{project or '未指定'}")
+        repo_path = repository_local_path(self.archive.base_dir, repo_key, repo)
+        await self.archive.prepare_topic(topic_path, topic)
+        prompt = topic_design_prompt(
+            code=str(ticket["code"]), title=str(ticket["title"]),
+            topic_path=str(self.archive.root / topic_path), design_path=str(self.archive.root / design_path),
+            review_date=review_date.isoformat(),
+        )
+        job_id = await self.jobs.create_topic_design(
+            repo_key=repo_key, repo_path=repo_path, ticket_id=int(ticket["id"]), prompt_text=prompt,
+        )
+        await self.jobs.wait_for_job(job_id)
+        return await self.archive.commit_prepared_documents(
+            topic_path=topic_path, design_path=design_path, commit_message=commit_message,
         )
 
     def _render_topic(self, ticket: dict[str, Any], design_path: Path, thread: list[dict[str, Any]]) -> str:

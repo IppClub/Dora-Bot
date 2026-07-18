@@ -27,7 +27,7 @@ class DoraOpsRuntime:
         classifier_client = OpenAICompatibleChatClient(config.llm.classifier) if config.llm.enabled else None
         planner_client = OpenAICompatibleChatClient(config.llm.summarizer) if config.llm.enabled else None
         self.topics = TopicService(config, storage)
-        self.topic_reviews = TopicReviewService(base_dir, config, storage, chat_client)
+        self.topic_reviews = TopicReviewService(base_dir, config, storage, chat_client, self.jobs)
         self.group_chat = GroupMessageService(config, storage, self.tracker, self.jobs, chat_client, classifier_client, planner_client, self.topics)
         self.admin = AdminCommands(
             base_dir,

@@ -1,5 +1,6 @@
 from datetime import datetime, time, timedelta
 from pathlib import Path
+import re
 import subprocess
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,31 @@ from dora_ops.runtime import DoraOpsRuntime
 
 def _git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+class _FakeTopicDesignJobs:
+    def __init__(self) -> None:
+        self.repo_path: Path | None = None
+        self.topic_markdown = ""
+        self.prompt = ""
+
+    async def create_topic_design(self, *, repo_key: str, repo_path: Path, ticket_id: int, prompt_text: str) -> int:
+        assert repo_key == "dora_ssr"
+        assert ticket_id == 1
+        self.repo_path = repo_path
+        self.prompt = prompt_text
+        topic_match = re.search(r"Read the complete ticket discussion from:\n(.+)", prompt_text)
+        design_match = re.search(r"Write the final Markdown design document directly to this exact path:\n(.+)", prompt_text)
+        assert topic_match is not None
+        assert design_match is not None
+        self.topic_markdown = Path(topic_match.group(1)).read_text(encoding="utf-8")
+        Path(design_match.group(1)).parent.mkdir(parents=True, exist_ok=True)
+        Path(design_match.group(1)).write_text("# ds1：OpenCode 分析\n\n## 现有项目分析\n\n- 已检查本地源码。\n", encoding="utf-8")
+        return 101
+
+    async def wait_for_job(self, job_id: int) -> dict[str, object]:
+        assert job_id == 101
+        return {"id": job_id}
 
 
 @pytest.mark.asyncio
@@ -32,6 +58,7 @@ repositories:
     local_path: {tmp_path}
 topic_archive:
   enabled: true
+  design_generator: fallback
   repository:
     local_path: {worktree}
     remote: {remote}
@@ -57,6 +84,58 @@ topic_archive:
     assert (worktree / "topics" / "ds1.md").exists()
     design = (worktree / "designs" / "ds1.md").read_text(encoding="utf-8")
     assert "讨论更新至" in design
+    assert _git_log_count(worktree) == 1
+
+
+@pytest.mark.asyncio
+async def test_daily_review_uses_opencode_in_project_and_commits_design(tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    worktree = tmp_path / "topic-repo"
+    source = tmp_path / "Dora-SSR"
+    _git("init", "--bare", "--initial-branch=main", str(remote), cwd=tmp_path)
+    _git("init", "--initial-branch=main", str(worktree), cwd=tmp_path)
+    _git("config", "user.name", "Dora Bot", cwd=worktree)
+    _git("config", "user.email", "dora@example.invalid", cwd=worktree)
+    _git("remote", "add", "origin", str(remote), cwd=worktree)
+    _git("init", "--initial-branch=main", str(source), cwd=tmp_path)
+
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(
+        f"""
+repositories:
+  dora_ssr:
+    name: Dora SSR
+    remote: https://example.invalid/Dora-SSR.git
+    local_path: {source}
+topic_archive:
+  enabled: true
+  design_generator: opencode
+  repository:
+    local_path: {worktree}
+    remote: {remote}
+    branch: main
+""",
+        encoding="utf-8",
+    )
+    runtime = await DoraOpsRuntime.create(config_path)
+    fake_jobs = _FakeTopicDesignJobs()
+    runtime.topic_reviews.jobs = fake_jobs  # type: ignore[assignment]
+    ticket = await runtime.topics.create_ticket(
+        group_id=456, user_id=789, nickname="tester", project="Dora-SSR", kind="feature",
+        title="OpenCode 日审", original_text="需要在项目中分析后形成设计稿", messages=(),
+    )
+    yesterday = datetime.combine(datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1), time(hour=12), tzinfo=ZoneInfo("Asia/Shanghai"))
+    await runtime.storage.append_topic_message(
+        ticket_id=int(ticket["id"]), group_id=456, user_id=789, nickname="tester",
+        content="ds1 请先分析 Dora-SSR 的现有实现。", source_message_at=int(yesterday.timestamp()),
+    )
+
+    assert await runtime.topic_reviews.review_yesterday() == ["ds1"]
+    assert fake_jobs.repo_path == source
+    assert "# ds1：OpenCode 日审" in fake_jobs.topic_markdown
+    assert "完整讨论线程" in fake_jobs.topic_markdown
+    assert str(worktree / "topics" / "ds1.md") in fake_jobs.prompt
+    assert (worktree / "designs" / "ds1.md").read_text(encoding="utf-8").startswith("# ds1：OpenCode 分析")
     assert _git_log_count(worktree) == 1
 
 
