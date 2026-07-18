@@ -45,7 +45,7 @@ class RepositoryConfig(BaseModel):
 
 
 class JobsConfig(BaseModel):
-    max_runtime_seconds: int = 600
+    max_runtime_seconds: int = 1200
     opencode_command: str = "opencode run"
 
 

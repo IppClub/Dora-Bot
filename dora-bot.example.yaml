@@ -57,7 +57,7 @@ repositories:
       - docs
 
 jobs:
-  max_runtime_seconds: 600
+  max_runtime_seconds: 1200
   opencode_command: opencode run
 
 llm:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import date
 from pathlib import Path
 import re
 from typing import Awaitable, Callable
@@ -27,6 +28,7 @@ from dora_ops.welcome import WelcomeMember
 PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
 PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
 APPROVED_FEEDBACK_JOB_PATTERN = re.compile(r"分析任务已创建：#(\d+)")
+TOPIC_REVIEW_COMMAND_PATTERN = re.compile(r"/topic\s+review\s+(ds\d+)(?:\s+(--notify-group))?\s*", re.IGNORECASE)
 logger = get_log("DoraOps") if get_log is not None else logging.getLogger(__name__)
 
 
@@ -44,6 +46,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     async def on_load(self) -> None:
         self._pending_group_messages: dict[int, PendingGroupMessage] = {}
+        self._private_topic_review_tasks: dict[str, asyncio.Task[None]] = {}
         self.runtime = await DoraOpsRuntime.create(Path("dora-bot.yaml"))
         logger.info(
             "dora_ops loaded: admins=%s admin_groups=%s group_enabled=%s group_ids=%s llm_enabled=%s",
@@ -135,13 +138,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             if ticket is None:
                 logger.warning("daily topic review notification skipped: ticket=%s not found", code)
                 continue
-            document_url = self.runtime.topic_reviews.design_url(code)
-            text = f"{code} 的设计文稿已更新：{document_url}" if document_url else f"{code} 的设计文稿已更新并推送。"
-            group_id = int(ticket["group_id"])
-            await self._send_group_reply(group_id, text)
-            await self._record_group_assistant_message(group_id, text)
-            if self.runtime.topics is not None:
-                await self.runtime.topics.record_bot_reply(ticket, text)
+            await self._send_topic_review_to_group(code, ticket)
 
     if registrar is not None:
 
@@ -150,6 +147,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             text = self._message_text(event)
             user_id = int(getattr(event, "user_id", 0))
             logger.info("private message received: user=%s text=%r", user_id, self._clip_log(text))
+            if await self._start_private_topic_review(text, user_id, lambda message: event.reply(text=message)):
+                return
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
             logger.info("private message handled: user=%s replied=%s", user_id, bool(result))
             if result:
@@ -193,6 +192,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             text = self._message_text(msg)
             user_id = int(getattr(msg, "user_id", 0))
             logger.info("private message received: user=%s text=%r", user_id, self._clip_log(text))
+            if await self._start_private_topic_review(text, user_id, lambda message: self._send_private_reply(user_id, message)):
+                return
             result = await self.runtime.handle_admin_text(text, user_id=user_id)
             logger.info("private message handled: user=%s replied=%s", user_id, bool(result))
             if result:
@@ -615,6 +616,72 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         if ticket is None:
             logger.warning("manual topic review notification skipped: ticket=%s not found", code)
             return
+        await self._send_topic_review_to_group(code, ticket)
+
+    async def _start_private_topic_review(
+        self,
+        command: str,
+        user_id: int,
+        send: Callable[[str], Awaitable[object]],
+    ) -> bool:
+        match = TOPIC_REVIEW_COMMAND_PATTERN.fullmatch(command.strip())
+        if match is None:
+            return False
+        if not self.runtime.admin.is_admin(user_id):
+            await send("没有管理员权限。")
+            return True
+        if self.runtime.topics is None or not self.runtime.topics.enabled or self.runtime.topic_reviews is None:
+            await send("话题审阅服务不可用。")
+            return True
+        code = match.group(1).lower()
+        ticket = await self.runtime.storage.get_topic_ticket(code)
+        if ticket is None:
+            await send("找不到该工单。")
+            return True
+        tasks = getattr(self, "_private_topic_review_tasks", None)
+        if tasks is None:
+            tasks = {}
+            self._private_topic_review_tasks = tasks
+        active = tasks.get(code)
+        if active is not None and not active.done():
+            await send(f"{code} 的设计文稿正在生成，请稍候。")
+            return True
+        await send(f"正在生成 {code} 的设计文稿，请稍候。")
+        tasks[code] = asyncio.create_task(
+            self._run_private_topic_review(
+                code=code,
+                ticket=ticket,
+                user_id=user_id,
+                notify_group=match.group(2) is not None,
+            )
+        )
+        return True
+
+    async def _run_private_topic_review(
+        self,
+        *,
+        code: str,
+        ticket: dict[str, object],
+        user_id: int,
+        notify_group: bool,
+    ) -> None:
+        try:
+            completed = await self.runtime.topic_reviews.review_date(date.today(), force_code=code)
+            if not completed:
+                await self._send_private_reply(user_id, "没有可审阅的新讨论。")
+                return
+            document_url = self.runtime.topic_reviews.design_url(code)
+            text = f"已生成并推送 {code} 的设计文稿：{document_url}" if document_url else f"已生成并推送 {code} 的设计文稿。"
+            await self._send_private_reply(user_id, text)
+            if notify_group:
+                await self._send_topic_review_to_group(code, ticket)
+        except Exception as exc:
+            logger.exception("private topic review failed: ticket=%s", code)
+            await self._send_private_reply(user_id, f"生成 {code} 的设计文稿失败：{exc}")
+        finally:
+            getattr(self, "_private_topic_review_tasks", {}).pop(code, None)
+
+    async def _send_topic_review_to_group(self, code: str, ticket: dict[str, object]) -> None:
         document_url = self.runtime.topic_reviews.design_url(code)
         text = f"{code} 的设计文稿已更新：{document_url}" if document_url else f"{code} 的设计文稿已更新并推送。"
         group_id = int(ticket["group_id"])
