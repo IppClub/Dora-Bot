@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, time, timedelta
 from pathlib import Path
 import re
@@ -167,3 +168,22 @@ repositories:
         )
     latest = await runtime.storage.list_topic_messages(int(ticket["id"]), limit=40)
     assert [row["content"] for row in latest] == [f"message {index}" for index in range(5, 45)]
+
+
+def test_design_url_uses_public_archive_location(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(
+        """
+repositories:
+  dora_ssr:
+    name: Dora SSR
+    remote: https://example.invalid/Dora-SSR.git
+topic_archive:
+  public_url: https://atomgit.com/ippclub/dora-topic/
+  repository:
+    branch: main
+""",
+        encoding="utf-8",
+    )
+    runtime = asyncio.run(DoraOpsRuntime.create(config_path))
+    assert runtime.topic_reviews.design_url("DS12") == "https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds12.md"

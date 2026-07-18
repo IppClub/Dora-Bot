@@ -434,6 +434,86 @@ async def test_daily_progress_group_send_records_chat_history(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_daily_topic_review_sends_each_document_link_to_ticket_group() -> None:
+    class FakeTopicReviews:
+        async def review_yesterday(self):
+            return ["ds1", "ds2"]
+
+        @staticmethod
+        def design_url(code):
+            return f"https://atomgit.com/ippclub/dora-topic/blob/main/designs/{code}.md"
+
+    class FakeStorage:
+        def __init__(self):
+            self.group_history = []
+
+        async def get_topic_ticket(self, code):
+            return {"id": int(code[-1]), "code": code, "group_id": 456 if code == "ds1" else 789}
+
+        async def append_chat_message(self, conversation_key, role, content):
+            self.group_history.append((conversation_key, role, content))
+
+    class FakeTopics:
+        def __init__(self):
+            self.replies = []
+
+        async def record_bot_reply(self, ticket, reply):
+            self.replies.append((ticket["code"], reply))
+
+    storage = FakeStorage()
+    topics = FakeTopics()
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = SimpleNamespace(topic_reviews=FakeTopicReviews(), storage=storage, topics=topics)
+
+    await plugin.daily_topic_review()
+
+    assert qq.group_messages == [
+        (456, {"text": "ds1 的设计文稿已更新：https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds1.md"}),
+        (789, {"text": "ds2 的设计文稿已更新：https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds2.md"}),
+    ]
+    assert [row[0] for row in storage.group_history] == ["group:456", "group:789"]
+    assert [row[0] for row in topics.replies] == ["ds1", "ds2"]
+
+
+@pytest.mark.asyncio
+async def test_manual_topic_review_only_notifies_group_when_requested() -> None:
+    class FakeTopicReviews:
+        @staticmethod
+        def design_url(code):
+            return f"https://atomgit.com/ippclub/dora-topic/blob/main/designs/{code}.md"
+
+    class FakeStorage:
+        async def get_topic_ticket(self, code):
+            return {"id": 1, "code": code, "group_id": 456}
+
+        async def append_chat_message(self, *args):
+            return None
+
+    class FakeTopics:
+        async def record_bot_reply(self, ticket, reply):
+            return None
+
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = FakeQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = SimpleNamespace(topic_reviews=FakeTopicReviews(), storage=FakeStorage(), topics=FakeTopics())
+
+    await plugin._maybe_send_topic_review_to_group(
+        "/topic review ds1", "已生成并推送 ds1 的设计文稿：https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds1.md",
+    )
+    assert qq.group_messages == []
+
+    await plugin._maybe_send_topic_review_to_group(
+        "/topic review ds1 --notify-group", "已生成并推送 ds1 的设计文稿：https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds1.md",
+    )
+    assert qq.group_messages == [
+        (456, {"text": "ds1 的设计文稿已更新：https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds1.md"}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_progress_results_send_raw_output_to_llm_summary(tmp_path: Path) -> None:
     output = tmp_path / "output.json"
     output.write_text(

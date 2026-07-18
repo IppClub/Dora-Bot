@@ -243,7 +243,7 @@ class AdminCommands:
                 "/topic list [open|paused|closed]",
                 "/topic show dsN",
                 "/topic close|reopen dsN [说明]",
-                "/topic review dsN",
+                "/topic review dsN [--notify-group]",
                 "/approvals",
                 "/approve feedback <id>",
                 "/reject feedback <id>",
@@ -291,11 +291,19 @@ class AdminCommands:
         if command == "review":
             if self.topic_reviews is None:
                 return "话题审阅服务不可用。"
-            ticket = await self.storage.get_topic_ticket(arg.lower())
+            parts = arg.split()
+            if not parts or any(part != "--notify-group" for part in parts[1:]):
+                raise ValueError("格式错误：/topic review dsN [--notify-group]")
+            ticket = await self.storage.get_topic_ticket(parts[0].lower())
             if ticket is None:
                 return "找不到该工单。"
             completed = await self.topic_reviews.review_date(date.today(), force_code=str(ticket["code"]))
-            return f"已生成并推送 {completed[0]} 的设计文稿。" if completed else "没有可审阅的新讨论。"
+            if not completed:
+                return "没有可审阅的新讨论。"
+            document_url = self.topic_reviews.design_url(completed[0])
+            if document_url:
+                return f"已生成并推送 {completed[0]} 的设计文稿：{document_url}"
+            return f"已生成并推送 {completed[0]} 的设计文稿。"
         raise ValueError("格式错误：/topic list|show|close|reopen|review ...")
 
     async def _handle_group_chat_test(self, arg: str, *, user_id: int) -> str:

@@ -130,10 +130,18 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             logger.exception("daily topic review failed")
             return
         logger.info("daily topic review completed: tickets=%s", completed)
-        if completed:
-            await self._send_admin_notifications(
-                f"话题日审已生成并推送：{'、'.join(completed)}"
-            )
+        for code in completed:
+            ticket = await self.runtime.storage.get_topic_ticket(code)
+            if ticket is None:
+                logger.warning("daily topic review notification skipped: ticket=%s not found", code)
+                continue
+            document_url = self.runtime.topic_reviews.design_url(code)
+            text = f"{code} 的设计文稿已更新：{document_url}" if document_url else f"{code} 的设计文稿已更新并推送。"
+            group_id = int(ticket["group_id"])
+            await self._send_group_reply(group_id, text)
+            await self._record_group_assistant_message(group_id, text)
+            if self.runtime.topics is not None:
+                await self.runtime.topics.record_bot_reply(ticket, text)
 
     if registrar is not None:
 
@@ -146,6 +154,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             logger.info("private message handled: user=%s replied=%s", user_id, bool(result))
             if result:
                 await event.reply(text=result)
+                await self._maybe_send_topic_review_to_group(text, result)
                 self._maybe_watch_daily_progress(text, result, lambda message: event.reply(text=message))
                 self._maybe_watch_feedback_analysis(result)
 
@@ -596,6 +605,23 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         for group_id in self._daily_summary_group_ids():
             await self._send_group_reply(group_id, text)
             await self._record_group_assistant_message(group_id, text)
+
+    async def _maybe_send_topic_review_to_group(self, command: str, result: str) -> None:
+        match = re.fullmatch(r"/topic\s+review\s+(ds\d+)\s+--notify-group\s*", command.strip(), re.IGNORECASE)
+        if match is None or not result.startswith("已生成并推送 "):
+            return
+        code = match.group(1).lower()
+        ticket = await self.runtime.storage.get_topic_ticket(code)
+        if ticket is None:
+            logger.warning("manual topic review notification skipped: ticket=%s not found", code)
+            return
+        document_url = self.runtime.topic_reviews.design_url(code)
+        text = f"{code} 的设计文稿已更新：{document_url}" if document_url else f"{code} 的设计文稿已更新并推送。"
+        group_id = int(ticket["group_id"])
+        await self._send_group_reply(group_id, text)
+        await self._record_group_assistant_message(group_id, text)
+        if self.runtime.topics is not None:
+            await self.runtime.topics.record_bot_reply(ticket, text)
 
     async def _record_group_assistant_message(self, group_id: int, text: str) -> None:
         await self.runtime.storage.append_chat_message(f"group:{group_id}", "assistant", text)

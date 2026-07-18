@@ -222,6 +222,14 @@ class TopicReviewService:
         self.jobs = jobs
         self.archive = TopicArchive(base_dir, config)
 
+    def design_url(self, code: str) -> str | None:
+        public_url = self.config.topic_archive.public_url.strip().rstrip("/")
+        if not public_url:
+            return None
+        path = (self.config.topic_archive.design_dir / f"{code.lower()}.md").as_posix()
+        branch = self.config.topic_archive.repository.branch
+        return f"{public_url}/blob/{branch}/{path}"
+
     async def review_yesterday(self) -> list[str]:
         zone = ZoneInfo(self.config.topic_archive.timezone)
         yesterday = datetime.now(zone).date() - timedelta(days=1)
