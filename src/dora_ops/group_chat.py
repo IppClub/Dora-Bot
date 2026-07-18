@@ -474,10 +474,10 @@ class GroupMessageService:
             limit=self.config.topic_archive.discussion_context_rounds * 2,
         )
         code = str(ticket["code"])
-        prefix = f"已建立工单 {code}：{ticket['title']}。" if created else ""
+        ticket_notice = f"已建立工单 {code}：{ticket['title']}。后续讨论带上 {code} 就会归集。"
         if self.chat_client is None:
             if created:
-                return f"{prefix} 我会跟进这件事；后续讨论带上 {code}，我会把完整对话归到同一线程。"
+                return f"我会跟进这件事；后续讨论会继续归到同一线程。\n\n{ticket_notice}"
             return f"已归集到 {code}。我会结合当前讨论继续跟进，明天整理进设计文稿。"
         transcript = "\n".join(
             f"{'多萝' if row.get('role') == 'assistant' else (row['nickname'] or row['user_id'])}：{row['content']}"
@@ -504,7 +504,7 @@ class GroupMessageService:
             reply = ""
         if not reply:
             reply = f"我已经记下这点，{code} 会继续按讨论推进。"
-        return f"{prefix}{reply}" if prefix else reply
+        return f"{reply}\n\n{ticket_notice}" if created else reply
 
     async def _llm_group_chat_reply(
         self,

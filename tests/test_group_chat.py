@@ -203,6 +203,8 @@ async def test_topic_thread_records_user_and_bot_replies_with_context(tmp_path: 
     assert ticket is not None
     thread = await runtime.storage.list_topic_messages(int(ticket["id"]))
     assert [row["role"] for row in thread] == ["user", "assistant", "user", "assistant"]
+    assert thread[1]["content"].startswith("先确认归档的目标仓库。")
+    assert "已建立工单 ds1" in thread[1]["content"]
     assert thread[-1]["content"] == "那就按最新消息 ID 去重。"
     assert len(chat.calls) == 2
     assert "先确认归档的目标仓库。" in chat.calls[-1][-1]["content"]
