@@ -99,7 +99,7 @@ class AdminCommands:
         if text.startswith("/topic"):
             try:
                 return await self._handle_topic(text)
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 return str(exc)
 
         parts = text.split(maxsplit=2)
