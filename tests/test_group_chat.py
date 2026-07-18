@@ -159,6 +159,8 @@ async def test_mentioned_feature_creates_topic_and_followup_is_collected(tmp_pat
             nickname="tester",
             text="@多萝 希望增加一个导出设计稿的 feature，按天自动归档。",
             mentions_bot=True,
+            bot_user_id="3844055063",
+            mentions=(GroupMention("3844055063", "多萝"),),
         )
     )
     assert created is not None
@@ -178,6 +180,48 @@ async def test_mentioned_feature_creates_topic_and_followup_is_collected(tmp_pat
         "ds1 设计稿需要记录最后讨论日期。",
     ]
     assert [row["role"] for row in messages] == ["user", "assistant", "user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_textual_bot_name_without_at_does_not_create_topic(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=789,
+            nickname="tester",
+            text="多萝，建议增加一个 feature：为 3D 场景提供 LOD。",
+            mentions_bot=False,
+        )
+    )
+
+    assert result is None or result.reason != "topic_created"
+    assert await runtime.storage.list_topic_tickets(limit=10) == []
+
+
+@pytest.mark.asyncio
+async def test_at_other_qq_cannot_create_topic_even_if_flagged(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    result = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=789,
+            nickname="tester",
+            text="@其他人 建议增加一个 feature：为 3D 场景提供 LOD。",
+            mentions_bot=True,
+            bot_user_id="3844055063",
+            mentions=(GroupMention("111", "其他人"),),
+        )
+    )
+
+    assert result is None or result.reason != "topic_created"
+    assert await runtime.storage.list_topic_tickets(limit=10) == []
 
 
 @pytest.mark.asyncio

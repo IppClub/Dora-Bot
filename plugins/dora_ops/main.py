@@ -37,6 +37,7 @@ class PendingGroupMessage:
         self.group_id = group_id
         self.messages: list[GroupBufferedMessage] = []
         self.mentions_bot = False
+        self.bot_user_id = ""
         self.task: asyncio.Task | None = None
 
 
@@ -176,6 +177,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 nickname=str(getattr(getattr(event, "sender", None), "nickname", "")),
                 text=text,
                 mentions_bot=mentions_bot,
+                bot_user_id=self._bot_user_id(event),
                 mentions=mentions,
             )
 
@@ -223,6 +225,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 nickname=str(getattr(getattr(msg, "sender", None), "nickname", "")),
                 text=text,
                 mentions_bot=mentions_bot,
+                bot_user_id=self._bot_user_id(msg),
                 mentions=mentions,
             )
 
@@ -277,6 +280,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         nickname: str,
         text: str,
         mentions_bot: bool,
+        bot_user_id: str = "",
         mentions: tuple[GroupMention, ...] = (),
     ) -> None:
         if not hasattr(self, "_pending_group_messages"):
@@ -295,6 +299,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             )
         )
         pending.mentions_bot = pending.mentions_bot or mentions_bot
+        if bot_user_id:
+            pending.bot_user_id = bot_user_id
         if pending.task is not None:
             pending.task.cancel()
         delay = self.runtime.config.group_chat.debounce_seconds
@@ -336,6 +342,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 nickname=last.nickname,
                 text=last.text,
                 mentions_bot=pending.mentions_bot,
+                bot_user_id=pending.bot_user_id,
+                mentions=last.mentions,
                 buffered_messages=messages,
             )
         )
@@ -455,7 +463,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     def _mentions_bot(msg) -> bool:
         raw = str(getattr(msg, "raw_message", "") or "")
         message = DoraOpsPlugin._message_segments(msg, raw=raw)
-        self_id = str(getattr(msg, "self_id", "") or getattr(getattr(msg, "data", None), "self_id", "")).strip()
+        self_id = DoraOpsPlugin._bot_user_id(msg)
         if not self_id:
             return False
         try:
@@ -467,6 +475,10 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             if DoraOpsPlugin._segment_type(item) == "at" and DoraOpsPlugin._segment_mention(item).user_id == self_id:
                 return True
         return False
+
+    @staticmethod
+    def _bot_user_id(msg) -> str:
+        return str(getattr(msg, "self_id", "") or getattr(getattr(msg, "data", None), "self_id", "")).strip()
 
     @staticmethod
     def _mentions(msg) -> tuple[GroupMention, ...]:

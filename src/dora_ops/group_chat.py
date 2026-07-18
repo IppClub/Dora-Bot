@@ -134,6 +134,7 @@ class GroupMessageInput:
     nickname: str
     text: str
     mentions_bot: bool = False
+    bot_user_id: str = ""
     mentions: tuple[GroupMention, ...] = ()
     buffered_messages: tuple[GroupBufferedMessage, ...] = ()
 
@@ -198,7 +199,10 @@ class GroupMessageService:
             text = "@多萝"
             messages = (GroupBufferedMessage(msg.user_id, msg.nickname, text, True, msg.mentions),)
         text = self._classification_text(messages)
-        mentions_bot = msg.mentions_bot or any(item.mentions_bot or self._contains_alias(item.text) for item in messages)
+        # A textual alias may invite ordinary chat, but ticket creation requires
+        # an actual QQ @ mention so discussion cannot create tickets by itself.
+        actual_bot_mention = self._has_actual_bot_mention(msg, messages)
+        mentions_bot = actual_bot_mention or any(self._contains_alias(item.text) for item in messages)
         if text.startswith("/test"):
             logger.info("group chat skipped: test command ignored group=%s user=%s", msg.group_id, msg.user_id)
             return None
@@ -250,7 +254,7 @@ class GroupMessageService:
             mentions_bot,
         )
         topic_candidate = self.topics is not None and self.topics.enabled and self.topics.is_ticket_candidate(text)
-        if self.topics is not None and self.topics.enabled and mentions_bot and (classification.should_accept or topic_candidate):
+        if self.topics is not None and self.topics.enabled and actual_bot_mention and (classification.should_accept or topic_candidate):
             if not classification.should_accept:
                 classification = Classification(True, "topic", "record_topic", None, 0.75, False, text[:120])
             ticket = await self.topics.create_ticket(
@@ -412,10 +416,6 @@ class GroupMessageService:
             reason=reason,
         )
 
-    def _contains_alias(self, text: str) -> bool:
-        lowered = text.lower()
-        return any(alias.lower() in lowered for alias in self.config.group_chat.bot_aliases)
-
     @staticmethod
     def _input_messages(msg: GroupMessageInput) -> tuple[GroupBufferedMessage, ...]:
         if msg.buffered_messages:
@@ -457,6 +457,23 @@ class GroupMessageService:
 
     def _chat_available(self) -> bool:
         return self.config.group_chat.chat_enabled and self.config.llm.enabled and self.chat_client is not None
+
+    @staticmethod
+    def _has_actual_bot_mention(msg: GroupMessageInput, messages: tuple[GroupBufferedMessage, ...]) -> bool:
+        bot_user_id = msg.bot_user_id.strip()
+        if bot_user_id:
+            return any(
+                mention.user_id == bot_user_id
+                for item in messages
+                for mention in item.mentions
+            )
+        # Direct callers used by the core runtime tests do not have a QQ event
+        # self_id. Production events always pass bot_user_id from OneBot.
+        return msg.mentions_bot or any(item.mentions_bot for item in messages)
+
+    def _contains_alias(self, text: str) -> bool:
+        lowered = text.lower()
+        return any(alias.lower() in lowered for alias in self.config.group_chat.bot_aliases)
 
     async def _classify(self, text: str, *, conversation_key: str) -> Classification:
         client = self.classifier_client if self.config.llm.enabled else None
