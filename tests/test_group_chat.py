@@ -53,6 +53,16 @@ llm:
 """
 
 
+TOPIC_CONFIG = CONFIG + """
+topic_archive:
+  enabled: true
+  repository:
+    local_path: .
+    remote: ""
+    branch: main
+"""
+
+
 class FakeChatClient:
     def __init__(self, replies: list[str]):
         self.replies = replies
@@ -119,6 +129,39 @@ async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> No
     approval = await runtime.storage.get_pending_approval("feedback", result.feedback_id)
     assert approval is not None
     assert approval["command"] == f"/approve feedback {result.feedback_id}"
+
+
+@pytest.mark.asyncio
+async def test_mentioned_feature_creates_topic_and_followup_is_collected(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+
+    created = await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456,
+            user_id=789,
+            nickname="tester",
+            text="@多萝 希望增加一个导出设计稿的 feature，按天自动归档。",
+            mentions_bot=True,
+        )
+    )
+    assert created is not None
+    assert created.topic_code == "ds1"
+    assert "ds1" in (created.reply or "")
+
+    collected = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=790, nickname="reviewer", text="ds1 设计稿需要记录最后讨论日期。")
+    )
+    assert collected is not None
+    assert collected.recorded_topic_codes == ("ds1",)
+    ticket = await runtime.storage.get_topic_ticket("ds1")
+    assert ticket is not None
+    messages = await runtime.storage.list_topic_messages(int(ticket["id"]))
+    assert [row["content"] for row in messages] == [
+        "@多萝 希望增加一个导出设计稿的 feature，按天自动归档。",
+        "ds1 设计稿需要记录最后讨论日期。",
+    ]
 
 
 @pytest.mark.asyncio

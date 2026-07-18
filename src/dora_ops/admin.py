@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 from .analysis_planner import AnalysisPlan, plan_feedback_analysis_with_llm
@@ -14,6 +15,7 @@ from .prompts import feedback_analysis_prompt, repo_diff_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
+from .topics import TopicReviewService, TopicService
 from .welcome import WelcomeMember, WelcomeService
 
 
@@ -47,6 +49,8 @@ class AdminCommands:
         chat_client: OpenAICompatibleChatClient | None = None,
         classifier_client: OpenAICompatibleChatClient | None = None,
         planner_client: OpenAICompatibleChatClient | None = None,
+        topics: TopicService | None = None,
+        topic_reviews: TopicReviewService | None = None,
     ):
         self.base_dir = base_dir
         self.config = config
@@ -59,6 +63,8 @@ class AdminCommands:
         self.chat_client = chat_client
         self.classifier_client = classifier_client
         self.planner_client = planner_client
+        self.topics = topics
+        self.topic_reviews = topic_reviews
 
     def is_admin(self, user_id: int, group_id: int | None = None) -> bool:
         if user_id in self.config.admin.user_ids:
@@ -69,7 +75,7 @@ class AdminCommands:
         if group_id is not None:
             logger.info("admin command skipped: group context user=%s group=%s", user_id, group_id)
             return None
-        if not (text.startswith("/test") or text.startswith("/approve") or text.startswith("/reject") or text.startswith("/approvals")):
+        if not (text.startswith("/test") or text.startswith("/topic") or text.startswith("/approve") or text.startswith("/reject") or text.startswith("/approvals")):
             if not self.is_admin(user_id):
                 logger.info("admin private chat skipped: non-admin user=%s", user_id)
                 return None
@@ -90,6 +96,11 @@ class AdminCommands:
                 return str(exc)
         if text.startswith("/approvals"):
             return await self._handle_approvals()
+        if text.startswith("/topic"):
+            try:
+                return await self._handle_topic(text)
+            except ValueError as exc:
+                return str(exc)
 
         parts = text.split(maxsplit=2)
         if len(parts) == 1:
@@ -229,11 +240,63 @@ class AdminCommands:
                 "/test daily-summary --dry-run",
                 "/test daily-summary --progress",
                 "/test job-status --include-test [--offset 5]",
+                "/topic list [open|paused|closed]",
+                "/topic show dsN",
+                "/topic close|reopen dsN [说明]",
+                "/topic review dsN",
                 "/approvals",
                 "/approve feedback <id>",
                 "/reject feedback <id>",
             ]
         )
+
+    async def _handle_topic(self, text: str) -> str:
+        if self.topics is None or not self.topics.enabled:
+            return "话题工单功能未启用。"
+        parts = text.split(maxsplit=2)
+        if len(parts) == 1:
+            return self.help_text()
+        command = parts[1].lower()
+        arg = parts[2].strip() if len(parts) > 2 else ""
+        if command == "list":
+            state = arg.lower() if arg else None
+            if state not in {None, "open", "paused", "closed"}:
+                raise ValueError("状态只能是 open、paused 或 closed。")
+            tickets = await self.storage.list_topic_tickets(status=state, limit=30)
+            if not tickets:
+                return "没有匹配的话题工单。"
+            return "\n".join(["话题工单："] + [
+                f"- {row['code']} [{row['status']}] {row['title']}（更新：{row.get('last_message_at') or '-'}）"
+                for row in tickets
+            ])
+        if command == "show":
+            ticket = await self.storage.get_topic_ticket(arg.lower())
+            if ticket is None:
+                return "找不到该工单。"
+            messages = await self.storage.list_topic_messages(int(ticket["id"]))
+            return "\n".join([
+                f"{ticket['code']} [{ticket['status']}]：{ticket['title']}",
+                f"项目：{ticket.get('project') or '未指定'}",
+                f"讨论条数：{len(messages)}；最后审阅：{ticket.get('last_reviewed_for_date') or '未进行'}",
+                f"原始诉求：{ticket['original_text']}",
+            ])
+        if command in {"close", "reopen"}:
+            code, _, note = arg.partition(" ")
+            ticket = await self.storage.get_topic_ticket(code.lower())
+            if ticket is None:
+                return "找不到该工单。"
+            status = "closed" if command == "close" else "open"
+            await self.storage.set_topic_status(str(ticket["code"]), status=status, close_note=note.strip() or None)
+            return f"{ticket['code']} 已{'关闭' if status == 'closed' else '重新打开'}。"
+        if command == "review":
+            if self.topic_reviews is None:
+                return "话题审阅服务不可用。"
+            ticket = await self.storage.get_topic_ticket(arg.lower())
+            if ticket is None:
+                return "找不到该工单。"
+            completed = await self.topic_reviews.review_date(date.today(), force_code=str(ticket["code"]))
+            return f"已生成并推送 {completed[0]} 的设计文稿。" if completed else "没有可审阅的新讨论。"
+        raise ValueError("格式错误：/topic list|show|close|reopen|review ...")
 
     async def _handle_group_chat_test(self, arg: str, *, user_id: int) -> str:
         target_group_id, text = self._parse_group_chat_test(arg)

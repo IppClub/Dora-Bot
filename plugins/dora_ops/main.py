@@ -59,6 +59,12 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                 self.runtime.config.scheduler.daily_summary_time,
                 callback=self.daily_progress_report,
             )
+            if self.runtime.config.topic_archive.enabled:
+                self.add_scheduled_task(
+                    "daily_topic_review",
+                    self.runtime.config.topic_archive.review_time,
+                    callback=self.daily_topic_review,
+                )
         asyncio.create_task(self._recover_feedback_analysis_jobs())
 
     async def _recover_feedback_analysis_jobs(self) -> None:
@@ -116,6 +122,18 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             logger.info("daily progress report skipped: no target groups configured")
             return
         await self._watch_progress_jobs(job_ids, self._send_daily_progress_result_to_groups)
+
+    async def daily_topic_review(self) -> None:
+        try:
+            completed = await self.runtime.topic_reviews.review_yesterday()
+        except Exception:
+            logger.exception("daily topic review failed")
+            return
+        logger.info("daily topic review completed: tickets=%s", completed)
+        if completed:
+            await self._send_admin_notifications(
+                f"话题日审已生成并推送：{'、'.join(completed)}"
+            )
 
     if registrar is not None:
 

@@ -121,6 +121,56 @@ create table if not exists chat_message(
 
 create index if not exists idx_chat_message_conversation_id
 on chat_message(conversation_key, id);
+
+create table if not exists topic_ticket(
+  id integer primary key autoincrement,
+  group_id integer not null,
+  sequence integer not null unique,
+  code text not null unique,
+  project text,
+  kind text not null,
+  title text not null,
+  original_text text not null,
+  status text not null default 'open',
+  created_by integer not null,
+  created_at integer not null,
+  closed_at integer,
+  close_note text,
+  last_message_at integer,
+  last_reviewed_message_id integer,
+  last_reviewed_for_date text,
+  last_design_updated_at integer,
+  last_review_commit text
+);
+
+create table if not exists topic_message(
+  id integer primary key autoincrement,
+  ticket_id integer not null references topic_ticket(id),
+  group_id integer not null,
+  user_id integer not null,
+  nickname text not null default '',
+  content text not null,
+  source_message_at integer not null,
+  created_at integer not null
+);
+
+create index if not exists idx_topic_message_ticket_id
+on topic_message(ticket_id, id);
+
+create table if not exists topic_sync(
+  id integer primary key autoincrement,
+  ticket_id integer not null references topic_ticket(id),
+  kind text not null default 'daily_review',
+  review_date text,
+  from_message_id integer,
+  to_message_id integer,
+  artifact_path text,
+  status text not null,
+  commit_sha text,
+  error text,
+  created_at integer not null,
+  finished_at integer
+);
 """
 
 
@@ -414,6 +464,176 @@ class Storage:
             db.row_factory = aiosqlite.Row
             row = await (await db.execute("select * from feedback where id=?", (feedback_id,))).fetchone()
             return dict(row) if row else None
+
+    async def create_topic_ticket(
+        self,
+        *,
+        group_id: int,
+        user_id: int,
+        project: str | None,
+        kind: str,
+        title: str,
+        original_text: str,
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("begin immediate")
+            row = await (await db.execute("select coalesce(max(sequence), 0) + 1 as sequence from topic_ticket")).fetchone()
+            sequence = int(row["sequence"])
+            code = f"ds{sequence}"
+            cursor = await db.execute(
+                """
+                insert into topic_ticket(
+                  group_id, sequence, code, project, kind, title, original_text,
+                  created_by, created_at, last_message_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (group_id, sequence, code, project, kind, title[:120], original_text, user_id, now, now),
+            )
+            ticket_id = int(cursor.lastrowid)
+            await db.commit()
+            row = await (await db.execute("select * from topic_ticket where id=?", (ticket_id,))).fetchone()
+            assert row is not None
+            return dict(row)
+
+    async def get_topic_ticket(self, code: str) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (await db.execute("select * from topic_ticket where code=?", (code.lower(),))).fetchone()
+            return dict(row) if row else None
+
+    async def list_topic_tickets(self, *, status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        query = "select * from topic_ticket"
+        params: list[Any] = []
+        if status:
+            query += " where status=?"
+            params.append(status)
+        query += " order by id desc limit ?"
+        params.append(limit)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (await db.execute(query, params)).fetchall()
+            return [dict(row) for row in rows]
+
+    async def append_topic_message(
+        self,
+        *,
+        ticket_id: int,
+        group_id: int,
+        user_id: int,
+        nickname: str,
+        content: str,
+        source_message_at: int | None = None,
+    ) -> int:
+        now = int(time.time())
+        message_at = source_message_at or now
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                insert into topic_message(ticket_id, group_id, user_id, nickname, content, source_message_at, created_at)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ticket_id, group_id, user_id, nickname, content, message_at, now),
+            )
+            await db.execute("update topic_ticket set last_message_at=? where id=?", (message_at, ticket_id))
+            await db.commit()
+            return int(cursor.lastrowid)
+
+    async def list_topic_messages(
+        self,
+        ticket_id: int,
+        *,
+        since_id: int | None = None,
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses = ["ticket_id=?"]
+        params: list[Any] = [ticket_id]
+        if since_id is not None:
+            clauses.append("id>?")
+            params.append(since_id)
+        if start_ts is not None:
+            clauses.append("source_message_at>=?")
+            params.append(start_ts)
+        if end_ts is not None:
+            clauses.append("source_message_at<?")
+            params.append(end_ts)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (
+                await db.execute(
+                    f"select * from topic_message where {' and '.join(clauses)} order by id asc",
+                    params,
+                )
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def set_topic_status(self, code: str, status: str, *, close_note: str | None = None) -> bool:
+        if status not in {"open", "paused", "closed"}:
+            raise ValueError("无效工单状态")
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                update topic_ticket set status=?, close_note=?, closed_at=case when ?='closed' then ? else null end
+                where code=?
+                """,
+                (status, close_note, status, int(time.time()), code.lower()),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
+    async def list_topics_for_review(self, *, start_ts: int, end_ts: int, review_date: str, limit: int) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (
+                await db.execute(
+                    """
+                    select t.* from topic_ticket t
+                    where t.status='open'
+                      and coalesce(t.last_reviewed_for_date, '') != ?
+                      and exists(
+                        select 1 from topic_message m
+                        where m.ticket_id=t.id and m.source_message_at>=? and m.source_message_at<?
+                          and m.id>coalesce(t.last_reviewed_message_id, 0)
+                      )
+                    order by t.id asc limit ?
+                    """,
+                    (review_date, start_ts, end_ts, limit),
+                )
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def create_topic_sync(self, *, ticket_id: int, review_date: str, from_message_id: int | None, to_message_id: int | None, artifact_path: str) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                insert into topic_sync(ticket_id, review_date, from_message_id, to_message_id, artifact_path, status, created_at)
+                values (?, ?, ?, ?, ?, 'running', ?)
+                """,
+                (ticket_id, review_date, from_message_id, to_message_id, artifact_path, int(time.time())),
+            )
+            await db.commit()
+            return int(cursor.lastrowid)
+
+    async def finish_topic_sync(self, sync_id: int, *, status: str, commit_sha: str | None = None, error: str | None = None) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "update topic_sync set status=?, commit_sha=?, error=?, finished_at=? where id=?",
+                (status, commit_sha, error, int(time.time()), sync_id),
+            )
+            await db.commit()
+
+    async def mark_topic_reviewed(self, *, ticket_id: int, review_date: str, last_message_id: int, commit_sha: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                update topic_ticket set last_reviewed_message_id=?, last_reviewed_for_date=?,
+                  last_design_updated_at=?, last_review_commit=? where id=?
+                """,
+                (last_message_id, review_date, int(time.time()), commit_sha, ticket_id),
+            )
+            await db.commit()
 
     async def count_quota_events(self, quota_key: str, since_ts: int, *, include_test: bool = False) -> int:
         test_filter = "" if include_test else "and is_test = 0"

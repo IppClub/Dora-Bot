@@ -10,6 +10,7 @@ from .llm import OpenAICompatibleChatClient
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .summary import SummaryService
+from .topics import TopicReviewService, TopicService
 from .welcome import WelcomeMember, WelcomeService
 
 
@@ -25,7 +26,9 @@ class DoraOpsRuntime:
         chat_client = OpenAICompatibleChatClient(config.llm.chat) if config.llm.enabled else None
         classifier_client = OpenAICompatibleChatClient(config.llm.classifier) if config.llm.enabled else None
         planner_client = OpenAICompatibleChatClient(config.llm.summarizer) if config.llm.enabled else None
-        self.group_chat = GroupMessageService(config, storage, self.tracker, self.jobs, chat_client, classifier_client, planner_client)
+        self.topics = TopicService(config, storage)
+        self.topic_reviews = TopicReviewService(base_dir, config, storage, chat_client)
+        self.group_chat = GroupMessageService(config, storage, self.tracker, self.jobs, chat_client, classifier_client, planner_client, self.topics)
         self.admin = AdminCommands(
             base_dir,
             config,
@@ -37,6 +40,8 @@ class DoraOpsRuntime:
             chat_client,
             classifier_client,
             planner_client,
+            self.topics,
+            self.topic_reviews,
         )
 
     @classmethod

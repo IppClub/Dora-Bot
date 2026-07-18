@@ -73,6 +73,23 @@ class SchedulerConfig(BaseModel):
     daily_summary_group_ids: set[int] = Field(default_factory=set)
 
 
+class TopicRepositoryConfig(BaseModel):
+    local_path: Path | None = None
+    remote: str = ""
+    branch: str = "main"
+
+
+class TopicArchiveConfig(BaseModel):
+    enabled: bool = False
+    repository: TopicRepositoryConfig = Field(default_factory=TopicRepositoryConfig)
+    docs_dir: Path = Path("topics")
+    design_dir: Path = Path("designs")
+    review_time: str = "08:30"
+    timezone: str = "Asia/Shanghai"
+    daily_review_24h_limit: int = Field(default=60, ge=1)
+    public_url: str = ""
+
+
 class BotConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     admin: AdminConfig = Field(default_factory=AdminConfig)
@@ -82,6 +99,7 @@ class BotConfig(BaseModel):
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    topic_archive: TopicArchiveConfig = Field(default_factory=TopicArchiveConfig)
 
     def ensure_dirs(self, base_dir: Path) -> None:
         for path in [

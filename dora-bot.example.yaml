@@ -93,3 +93,18 @@ scheduler:
   timezone: Asia/Shanghai
   # Optional. If empty, scheduled daily progress results are sent to group_chat.enabled_group_ids.
   daily_summary_group_ids: []
+
+# Store discussion records separately from source repositories. Configure a
+# writable clone on the Bot server before enabling this feature.
+topic_archive:
+  enabled: false
+  repository:
+    local_path: /srv/dora-topic
+    remote: git@atomgit.com:ippclub/dora-topic.git
+    branch: main
+  docs_dir: topics
+  design_dir: designs
+  review_time: "08:30"
+  timezone: Asia/Shanghai
+  daily_review_24h_limit: 60
+  public_url: https://atomgit.com/ippclub/dora-topic

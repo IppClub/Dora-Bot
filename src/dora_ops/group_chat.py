@@ -12,6 +12,7 @@ from .llm import LLMError, OpenAICompatibleChatClient
 from .prompts import feedback_analysis_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
+from .topics import TopicService
 
 
 try:
@@ -148,6 +149,8 @@ class GroupMessageResult:
     accepted_for_analysis: bool = False
     analysis_job_id: int | None = None
     reason: str = ""
+    topic_code: str | None = None
+    recorded_topic_codes: tuple[str, ...] = ()
 
 
 class GroupMessageService:
@@ -160,6 +163,7 @@ class GroupMessageService:
         chat_client: OpenAICompatibleChatClient | None = None,
         classifier_client: OpenAICompatibleChatClient | None = None,
         planner_client: OpenAICompatibleChatClient | None = None,
+        topics: TopicService | None = None,
     ):
         self.config = config
         self.storage = storage
@@ -169,6 +173,7 @@ class GroupMessageService:
         self.chat_client = chat_client
         self.classifier_client = classifier_client
         self.planner_client = planner_client
+        self.topics = topics
         self._last_chat_reply_at: dict[int, float] = {}
 
     async def handle(self, msg: GroupMessageInput) -> GroupMessageResult | None:
@@ -208,6 +213,22 @@ class GroupMessageService:
                 "user",
                 formatted,
             )
+        if self.topics is not None and self.topics.enabled:
+            recorded_codes = await self.topics.record_references(
+                group_id=msg.group_id,
+                user_id=msg.user_id,
+                nickname=msg.nickname,
+                messages=messages,
+            )
+            if recorded_codes:
+                reply = f"已归集 {'、'.join(recorded_codes)} 的讨论；明天会整理进设计文稿。"
+                await self.storage.append_chat_message(conversation_key, "assistant", reply)
+                return GroupMessageResult(
+                    classification=Classification(False, "topic", "ignore", None, 1.0, False, ""),
+                    reply=reply,
+                    reason="topic_recorded",
+                    recorded_topic_codes=recorded_codes,
+                )
         classification = await self._classify(text, conversation_key=conversation_key)
         logger.info(
             "group chat classified: group=%s user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f mentions=%s",
@@ -220,6 +241,28 @@ class GroupMessageService:
             classification.confidence,
             mentions_bot,
         )
+        topic_candidate = self.topics is not None and self.topics.enabled and self.topics.is_ticket_candidate(text)
+        if self.topics is not None and self.topics.enabled and mentions_bot and (classification.should_accept or topic_candidate):
+            if not classification.should_accept:
+                classification = Classification(True, "topic", "record_topic", None, 0.75, False, text[:120])
+            ticket = await self.topics.create_ticket(
+                group_id=msg.group_id,
+                user_id=msg.user_id,
+                nickname=msg.nickname,
+                project=classification.project,
+                kind=classification.kind,
+                title=classification.summary[:80] or "待整理的话题",
+                original_text=text,
+                messages=messages,
+            )
+            reply = f"已建立工单 {ticket['code']}：{ticket['title']}。后续讨论带上 {ticket['code']} 就会归集。"
+            await self.storage.append_chat_message(conversation_key, "assistant", reply)
+            return GroupMessageResult(
+                classification=classification,
+                reply=reply,
+                reason="topic_created",
+                topic_code=str(ticket["code"]),
+            )
         can_chat = self._can_chat(msg.group_id, mentions_bot=mentions_bot)
         should_explain = self._should_explain(classification, mentions_bot=mentions_bot)
         if not classification.should_accept and not mentions_bot and not should_explain:
