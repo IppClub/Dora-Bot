@@ -63,6 +63,21 @@ topic_archive:
 """
 
 
+TOPIC_LLM_CONFIG = TOPIC_CONFIG + """
+llm:
+  enabled: true
+  max_context_messages: 3
+  chat:
+    provider: openai-compatible
+    base_url: https://example.invalid
+    api_key_env: TEST_API_KEY
+    model: test-model
+    temperature: 0.1
+    max_tokens: 128
+    timeout_seconds: 5
+"""
+
+
 class FakeChatClient:
     def __init__(self, replies: list[str]):
         self.replies = replies
@@ -158,10 +173,39 @@ async def test_mentioned_feature_creates_topic_and_followup_is_collected(tmp_pat
     ticket = await runtime.storage.get_topic_ticket("ds1")
     assert ticket is not None
     messages = await runtime.storage.list_topic_messages(int(ticket["id"]))
-    assert [row["content"] for row in messages] == [
+    assert [row["content"] for row in messages if row["role"] == "user"] == [
         "@多萝 希望增加一个导出设计稿的 feature，按天自动归档。",
         "ds1 设计稿需要记录最后讨论日期。",
     ]
+    assert [row["role"] for row in messages] == ["user", "assistant", "user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_topic_thread_records_user_and_bot_replies_with_context(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    chat = FakeChatClient(["先确认归档的目标仓库。", "那就按最新消息 ID 去重。"])
+    runtime.group_chat.chat_client = chat
+
+    await runtime.handle_group_message(
+        GroupMessageInput(
+            group_id=456, user_id=789, nickname="tester", mentions_bot=True,
+            text="@多萝 希望增加每日讨论归档 feature，并保存到独立仓库。",
+        )
+    )
+    followup = await runtime.handle_group_message(
+        GroupMessageInput(group_id=456, user_id=790, nickname="reviewer", text="ds1 需要按消息 ID 避免重复生成。")
+    )
+
+    assert followup is not None
+    ticket = await runtime.storage.get_topic_ticket("ds1")
+    assert ticket is not None
+    thread = await runtime.storage.list_topic_messages(int(ticket["id"]))
+    assert [row["role"] for row in thread] == ["user", "assistant", "user", "assistant"]
+    assert thread[-1]["content"] == "那就按最新消息 ID 去重。"
+    assert len(chat.calls) == 2
+    assert "先确认归档的目标仓库。" in chat.calls[-1][-1]["content"]
 
 
 @pytest.mark.asyncio

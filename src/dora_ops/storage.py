@@ -149,6 +149,7 @@ create table if not exists topic_message(
   group_id integer not null,
   user_id integer not null,
   nickname text not null default '',
+  role text not null default 'user',
   content text not null,
   source_message_at integer not null,
   created_at integer not null
@@ -186,6 +187,9 @@ class Storage:
                 await db.execute("alter table analysis_job add column created_at integer not null default 0")
             except aiosqlite.OperationalError:
                 pass
+            columns = await (await db.execute("pragma table_info(topic_message)")).fetchall()
+            if "role" not in {str(row[1]) for row in columns}:
+                await db.execute("alter table topic_message add column role text not null default 'user'")
             await db.execute("update analysis_job set created_at=coalesce(nullif(created_at, 0), coalesce(started_at, finished_at, ?))", (int(time.time()),))
             await db.commit()
 
@@ -524,17 +528,20 @@ class Storage:
         user_id: int,
         nickname: str,
         content: str,
+        role: str = "user",
         source_message_at: int | None = None,
     ) -> int:
+        if role not in {"user", "assistant"}:
+            raise ValueError("无效话题消息角色")
         now = int(time.time())
         message_at = source_message_at or now
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 """
-                insert into topic_message(ticket_id, group_id, user_id, nickname, content, source_message_at, created_at)
-                values (?, ?, ?, ?, ?, ?, ?)
+                insert into topic_message(ticket_id, group_id, user_id, nickname, role, content, source_message_at, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ticket_id, group_id, user_id, nickname, content, message_at, now),
+                (ticket_id, group_id, user_id, nickname, role, content, message_at, now),
             )
             await db.execute("update topic_ticket set last_message_at=? where id=?", (message_at, ticket_id))
             await db.commit()
@@ -547,6 +554,7 @@ class Storage:
         since_id: int | None = None,
         start_ts: int | None = None,
         end_ts: int | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["ticket_id=?"]
         params: list[Any] = [ticket_id]
@@ -561,12 +569,11 @@ class Storage:
             params.append(end_ts)
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            rows = await (
-                await db.execute(
-                    f"select * from topic_message where {' and '.join(clauses)} order by id asc",
-                    params,
-                )
-            ).fetchall()
+            query = f"select * from topic_message where {' and '.join(clauses)} order by id asc"
+            if limit is not None:
+                query = f"select * from ({query.replace('order by id asc', 'order by id desc limit ?')}) order by id asc"
+                params.append(limit)
+            rows = await (await db.execute(query, params)).fetchall()
             return [dict(row) for row in rows]
 
     async def set_topic_status(self, code: str, status: str, *, close_note: str | None = None) -> bool:

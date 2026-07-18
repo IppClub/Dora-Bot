@@ -7,7 +7,7 @@
 - 创建入口：群友 `@多萝` 后提出明确的项目 issue 或 feature 设计。
 - 工单编号：`ds1`、`ds2`……；全局递增且唯一，大小写不敏感。
 - 归集入口：后续消息含独立编号（例如 `ds1`、`DS1`）即可关联；不必重复 @ Bot。
-- 归档结果：Bot 保存可追溯讨论记录，并在 T+1 审阅后更新独立的分析设计文稿，提交并推送到 AtomGit。
+- 归档结果：Bot 保存包含用户与多萝回复的完整讨论线程，并在 T+1 审阅后更新独立的分析设计文稿，提交并推送到 AtomGit。
 - 目标边界：此功能记录和整理讨论，不替代 GitHub/AtomGit 的 Issue，也不在未批准时修改源码仓库。
 
 ## 2. 交互约定
@@ -29,7 +29,7 @@
 
 ### 2.2 归集与反馈
 
-每条命中工单编号的群消息都会保存原文、作者、时间和所属群，作为分析的可追溯证据。群内即时阶段只确认已归集，不调用 LLM、不提交 Git：
+每条命中工单编号的群消息都会保存原文、作者、时间和所属群，随后由多萝参与讨论；Bot 回复同样写入该工单线程。每次回复最多使用最近 20 轮（至多 40 条用户/Bot 消息）作为上下文，不混入其他工单或全群历史。即时阶段不提交 Git：
 
 ```text
 ds1 已归集，明天会基于今天的讨论生成设计分析稿。
@@ -118,6 +118,7 @@ create table topic_message(
   group_id integer not null,
   user_id integer not null,
   nickname text not null default '',
+  role text not null check(role in ('user', 'assistant')),
   content text not null,
   source_message_at integer not null,
   created_at integer not null
@@ -139,18 +140,18 @@ create table topic_sync(
 );
 ```
 
-`sequence` 在所有群中从 1 递增，显示码由 `ds{sequence}` 生成；数据库始终保存小写 `code`。`topic_message` 是权威原始记录。`topics/*.md` 只保存工单元数据和原始诉求，`designs/*.md` 是由 T+1 审阅生成、可由数据库消息重建的设计分析稿。
+`sequence` 在所有群中从 1 递增，显示码由 `ds{sequence}` 生成；数据库始终保存小写 `code`。`topic_message` 是权威讨论线程记录，`role` 区分用户与多萝。`topics/*.md` 保存工单元数据、原始诉求与完整讨论线程，`designs/*.md` 是由 T+1 审阅生成、可由数据库消息重建的设计分析稿。
 
 ## 5. 服务划分
 
 新增以下模块，保留 `GroupMessageService` 负责入口路由而不是承载全部业务：
 
 - `topic_classifier.py`：判定 `issue`、`feature_design`、`not_topic`，并输出标题、项目和置信度。
-- `topic_service.py`：创建工单、抽取编号、保存消息、权限和状态判断。
+- `topic_service.py`：创建工单、抽取编号、保存用户/Bot 线程消息、权限和状态判断。
 - `topic_review.py`：选择昨天有新增讨论的工单，防重、调度和失败重试。
 - `topic_renderer.py`：调用 LLM 生成结构化的分析设计内容，渲染确定性的 Markdown。
 - `topic_archive.py`：唯一允许触碰归档 Git 工作区的组件，串行执行审阅稿写入、提交与推送。
-- `prompts.py`：增加工单创建与 T+1 设计审阅 prompt；输入仅包含该工单昨日新增消息、必要的历史结论和旧设计稿，不混入全群 `chat_message`。
+- `prompts.py`：增加工单讨论与 T+1 设计审阅 prompt；讨论回复使用同一工单最近 20 轮线程，日审输入仅包含该工单新增消息、必要的历史结论和旧设计稿，不混入全群 `chat_message`。
 
 在 `GroupMessageService.handle()` 中的顺序：
 
@@ -163,7 +164,7 @@ create table topic_sync(
 
 ## 6. Markdown 与 LLM 输出
 
-工单索引固定为 `topics/ds1.md`，只记录元数据、原始诉求和设计稿链接；它不是逐条群聊原文的镜像。分析设计稿固定为 `designs/ds1.md`，不按标题命名，避免重命名破坏链接。其格式：
+工单索引固定为 `topics/ds1.md`，记录元数据、原始诉求、设计稿链接和完整的用户—多萝讨论线程。分析设计稿固定为 `designs/ds1.md`，不按标题命名，避免重命名破坏链接。其格式：
 
 ```markdown
 # ds1：Web IDE 离线草稿保存

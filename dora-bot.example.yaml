@@ -107,4 +107,5 @@ topic_archive:
   review_time: "08:30"
   timezone: Asia/Shanghai
   daily_review_24h_limit: 60
+  discussion_context_rounds: 20
   public_url: https://atomgit.com/ippclub/dora-topic

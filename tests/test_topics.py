@@ -63,3 +63,28 @@ topic_archive:
 def _git_log_count(worktree: Path) -> int:
     result = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=worktree, check=True, capture_output=True, text=True)
     return int(result.stdout.strip())
+
+
+@pytest.mark.asyncio
+async def test_topic_message_limit_returns_latest_messages_in_order(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(
+        """
+repositories:
+  dora_ssr:
+    name: Dora SSR
+    remote: https://example.invalid/Dora-SSR.git
+    local_path: .
+""",
+        encoding="utf-8",
+    )
+    runtime = await DoraOpsRuntime.create(config_path)
+    ticket = await runtime.storage.create_topic_ticket(
+        group_id=1, user_id=1, project=None, kind="feature", title="limit", original_text="limit",
+    )
+    for index in range(45):
+        await runtime.storage.append_topic_message(
+            ticket_id=int(ticket["id"]), group_id=1, user_id=1, nickname="tester", content=f"message {index}",
+        )
+    latest = await runtime.storage.list_topic_messages(int(ticket["id"]), limit=40)
+    assert [row["content"] for row in latest] == [f"message {index}" for index in range(5, 45)]

@@ -89,6 +89,16 @@ class TopicService:
             )
         return ticket
 
+    async def record_bot_reply(self, ticket: dict[str, Any], reply: str) -> None:
+        await self.storage.append_topic_message(
+            ticket_id=int(ticket["id"]),
+            group_id=int(ticket["group_id"]),
+            user_id=0,
+            nickname="多萝",
+            role="assistant",
+            content=reply.strip(),
+        )
+
 
 class TopicArchive:
     def __init__(self, base_dir: Path, config: BotConfig):
@@ -206,7 +216,8 @@ class TopicReviewService:
         design_path = self.config.topic_archive.design_dir / f"{code}.md"
         topic_path = self.config.topic_archive.docs_dir / f"{code}.md"
         design = await self._render_design(ticket, messages, design_path, zone)
-        topic = self._render_topic(ticket, design_path)
+        thread = await self.storage.list_topic_messages(int(ticket["id"]))
+        topic = self._render_topic(ticket, design_path, thread)
         sync_id = await self.storage.create_topic_sync(
             ticket_id=int(ticket["id"]), review_date=review_date.isoformat(),
             from_message_id=int(messages[0]["id"]), to_message_id=int(messages[-1]["id"]), artifact_path=str(design_path),
@@ -224,13 +235,19 @@ class TopicReviewService:
             ticket_id=int(ticket["id"]), review_date=review_date.isoformat(), last_message_id=int(messages[-1]["id"]), commit_sha=commit,
         )
 
-    def _render_topic(self, ticket: dict[str, Any], design_path: Path) -> str:
+    def _render_topic(self, ticket: dict[str, Any], design_path: Path, thread: list[dict[str, Any]]) -> str:
         return "\n".join([
             f"# {ticket['code']}：{ticket['title']}", "",
             f"- 状态：{ticket['status']}", f"- 项目：{ticket.get('project') or '未指定'}",
             f"- 创建于：{self._date(int(ticket['created_at']))}", f"- 来源群：{ticket['group_id']}", "",
             "## 原始诉求", "", str(ticket["original_text"]).strip(), "",
             "## 分析设计稿", "", f"- [{design_path}]({design_path.as_posix()})", "",
+            "## 完整讨论线程", "",
+            *[
+                f"- #{item['id']} {'多萝' if item.get('role') == 'assistant' else (item['nickname'] or item['user_id'])}：{item['content']}"
+                for item in thread
+            ],
+            "",
         ])
 
     async def _render_design(self, ticket: dict[str, Any], messages: list[dict[str, Any]], design_path: Path, zone: ZoneInfo) -> str:
@@ -238,7 +255,8 @@ class TopicReviewService:
         if self.chat_client is None:
             return fallback
         transcript = "\n".join(
-            f"#{item['id']} {item['nickname'] or item['user_id']}：{item['content']}" for item in messages
+            f"#{item['id']} {'多萝' if item.get('role') == 'assistant' else (item['nickname'] or item['user_id'])}：{item['content']}"
+            for item in messages
         )
         try:
             body = (await self.chat_client.complete([
@@ -252,7 +270,10 @@ class TopicReviewService:
         return fallback
 
     def _fallback_design(self, ticket: dict[str, Any], messages: list[dict[str, Any]], zone: ZoneInfo) -> str:
-        conclusions = "\n".join(f"- #{item['id']} {item['nickname'] or item['user_id']}：{item['content']}" for item in messages)
+        conclusions = "\n".join(
+            f"- #{item['id']} {'多萝' if item.get('role') == 'assistant' else (item['nickname'] or item['user_id'])}：{item['content']}"
+            for item in messages
+        )
         return self._front_matter(ticket, messages, zone) + "\n".join([
             "## 问题定义与目标", "", str(ticket["original_text"]).strip(), "",
             "## 方案与取舍", "", "- 待基于后续讨论和仓库分析确认。", "",

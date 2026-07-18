@@ -221,7 +221,15 @@ class GroupMessageService:
                 messages=messages,
             )
             if recorded_codes:
-                reply = f"已归集 {'、'.join(recorded_codes)} 的讨论；明天会整理进设计文稿。"
+                replies: list[str] = []
+                for code in recorded_codes:
+                    ticket = await self.storage.get_topic_ticket(code)
+                    if ticket is None:
+                        continue
+                    discussion_reply = await self._topic_discussion_reply(ticket, created=False)
+                    await self.topics.record_bot_reply(ticket, discussion_reply)
+                    replies.append(f"{code}：{discussion_reply}")
+                reply = "\n".join(replies) or f"已归集 {'、'.join(recorded_codes)} 的讨论；明天会整理进设计文稿。"
                 await self.storage.append_chat_message(conversation_key, "assistant", reply)
                 return GroupMessageResult(
                     classification=Classification(False, "topic", "ignore", None, 1.0, False, ""),
@@ -255,7 +263,8 @@ class GroupMessageService:
                 original_text=text,
                 messages=messages,
             )
-            reply = f"已建立工单 {ticket['code']}：{ticket['title']}。后续讨论带上 {ticket['code']} 就会归集。"
+            reply = await self._topic_discussion_reply(ticket, created=True)
+            await self.topics.record_bot_reply(ticket, reply)
             await self.storage.append_chat_message(conversation_key, "assistant", reply)
             return GroupMessageResult(
                 classification=classification,
@@ -457,6 +466,45 @@ class GroupMessageService:
         )
         context_text = "\n".join(str(row["content"]) for row in recent[:-1])
         return await classify_text_with_llm(text, client, context_text=context_text)
+
+    async def _topic_discussion_reply(self, ticket: dict[str, object], *, created: bool) -> str:
+        assert self.topics is not None
+        context = await self.storage.list_topic_messages(
+            int(ticket["id"]),
+            limit=self.config.topic_archive.discussion_context_rounds * 2,
+        )
+        code = str(ticket["code"])
+        prefix = f"已建立工单 {code}：{ticket['title']}。" if created else ""
+        if self.chat_client is None:
+            if created:
+                return f"{prefix} 我会跟进这件事；后续讨论带上 {code}，我会把完整对话归到同一线程。"
+            return f"已归集到 {code}。我会结合当前讨论继续跟进，明天整理进设计文稿。"
+        transcript = "\n".join(
+            f"{'多萝' if row.get('role') == 'assistant' else (row['nickname'] or row['user_id'])}：{row['content']}"
+            for row in context
+        )
+        try:
+            reply = (await self.chat_client.complete([
+                {
+                    "role": "system",
+                    "content": (
+                        f"{DORA_PERSONA_PROMPT}\n\n"
+                        "你正在参与一个工单讨论线程。基于给定的最近 20 轮用户与多萝对话，回应最新用户反馈。"
+                        "先解决或澄清当前问题，必要时提出不超过两个关键追问；不编造实现、测试或结论。"
+                        "回复像群聊消息，最多三句话。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"工单 {code}：{ticket['title']}\n讨论线程：\n{transcript}",
+                },
+            ])).strip().strip('"')
+        except LLMError as exc:
+            logger.info("topic discussion llm reply failed: ticket=%s error=%s", code, exc)
+            reply = ""
+        if not reply:
+            reply = f"我已经记下这点，{code} 会继续按讨论推进。"
+        return f"{prefix}{reply}" if prefix else reply
 
     async def _llm_group_chat_reply(
         self,

@@ -87,6 +87,7 @@ class TopicArchiveConfig(BaseModel):
     review_time: str = "08:30"
     timezone: str = "Asia/Shanghai"
     daily_review_24h_limit: int = Field(default=60, ge=1)
+    discussion_context_rounds: int = Field(default=20, ge=1, le=100)
     public_url: str = ""
 
 
