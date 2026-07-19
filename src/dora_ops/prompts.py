@@ -122,6 +122,8 @@ Rules:
 - Do not invent code paths, APIs, results, or conclusions.
 - Do not modify any file in the source repository. Do not run Git write commands.
 - Only write the specified design Markdown file; the Bot will validate, commit and push the archive repository.
+- This is a file-producing task, not a chat-only analysis: use your file-write tool to create the specified design file before responding.
+- Before finishing, verify that the exact design path exists and is non-empty. Do not finish with only an explanation of your analysis.
 """
 
 

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dora_ops.runtime import DoraOpsRuntime
-from dora_ops.topics import TopicArchive
+from dora_ops.topics import TopicArchive, TopicReviewService
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -188,6 +188,12 @@ topic_archive:
     )
     runtime = asyncio.run(DoraOpsRuntime.create(config_path))
     assert runtime.topic_reviews.design_url("DS12") == "https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds12.md"
+
+
+def test_every_topic_project_uses_dora_ssr_repository() -> None:
+    assert TopicReviewService._repo_key_for_project("Dora-SSR/YueScript") == "dora_ssr"
+    assert TopicReviewService._repo_key_for_project("YueScript") == "dora_ssr"
+    assert TopicReviewService._repo_key_for_project("") == "dora_ssr"
 
 
 @pytest.mark.asyncio

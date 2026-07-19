@@ -17,3 +17,5 @@ def test_topic_design_prompt_limits_opencode_writes_to_design_document() -> None
     assert "/archive/designs/ds1.md" in prompt
     assert "Do not modify any file in the source repository" in prompt
     assert "Do not run Git write commands" in prompt
+    assert "file-producing task" in prompt
+    assert "exists and is non-empty" in prompt

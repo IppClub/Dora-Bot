@@ -241,6 +241,12 @@ class TopicReviewService:
         branch = self.config.topic_archive.repository.branch
         return f"{public_url}/blob/{branch}/{path}"
 
+    @staticmethod
+    def _repo_key_for_project(project: str) -> str:
+        # Topic design research is deliberately centralized in Dora-SSR. Project
+        # classification remains metadata and does not change the analysis repo.
+        return "dora_ssr"
+
     async def review_yesterday(self) -> list[str]:
         zone = ZoneInfo(self.config.topic_archive.timezone)
         yesterday = datetime.now(zone).date() - timedelta(days=1)
@@ -316,7 +322,7 @@ class TopicReviewService:
         if self.jobs is None:
             raise RuntimeError("OpenCode 话题设计任务服务不可用")
         project = str(ticket.get("project") or "")
-        repo_key = "yuescript" if "yue" in project.lower() else "dora_ssr"
+        repo_key = self._repo_key_for_project(project)
         repo = self.config.repositories.get(repo_key)
         if repo is None:
             raise RuntimeError(f"工单项目未配置本地仓库：{project or '未指定'}")
