@@ -199,6 +199,17 @@ class TopicArchive:
                 await self._git("push", "origin", self.config.topic_archive.repository.branch)
             return await self._git("rev-parse", "HEAD")
 
+    async def discard_unwritten_topic(self, topic_path: Path) -> None:
+        """Remove only an untracked topic file left by a failed OpenCode run."""
+        async with self._lock:
+            status = await self._git("status", "--porcelain", "--untracked-files=all")
+            expected = f"?? {topic_path}"
+            if expected not in status.splitlines():
+                return
+            target = self.root / topic_path
+            if target.is_file():
+                target.unlink()
+
     @staticmethod
     def _write(path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,9 +331,14 @@ class TopicReviewService:
             repo_key=repo_key, repo_path=repo_path, ticket_id=int(ticket["id"]), prompt_text=prompt,
         )
         await self.jobs.wait_for_job(job_id)
-        return await self.archive.commit_prepared_documents(
-            topic_path=topic_path, design_path=design_path, commit_message=commit_message,
-        )
+        try:
+            return await self.archive.commit_prepared_documents(
+                topic_path=topic_path, design_path=design_path, commit_message=commit_message,
+            )
+        except ValueError as exc:
+            if str(exc) == "OpenCode 未写入设计文稿":
+                await self.archive.discard_unwritten_topic(topic_path)
+            raise
 
     def _render_topic(self, ticket: dict[str, Any], design_path: Path, thread: list[dict[str, Any]]) -> str:
         return "\n".join([

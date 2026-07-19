@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dora_ops.runtime import DoraOpsRuntime
+from dora_ops.topics import TopicArchive
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -187,3 +188,32 @@ topic_archive:
     )
     runtime = asyncio.run(DoraOpsRuntime.create(config_path))
     assert runtime.topic_reviews.design_url("DS12") == "https://atomgit.com/ippclub/dora-topic/blob/main/designs/ds12.md"
+
+
+@pytest.mark.asyncio
+async def test_failed_opencode_cleanup_removes_only_untracked_topic(tmp_path: Path) -> None:
+    worktree = tmp_path / "topic-repo"
+    _git("init", "--initial-branch=main", str(worktree), cwd=tmp_path)
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(
+        f"""
+repositories:
+  dora_ssr:
+    name: Dora SSR
+    remote: https://example.invalid/Dora-SSR.git
+topic_archive:
+  repository:
+    local_path: {worktree}
+    branch: main
+""",
+        encoding="utf-8",
+    )
+    runtime = await DoraOpsRuntime.create(config_path)
+    archive = TopicArchive(tmp_path, runtime.config)
+    topic_path = Path("topics/ds6.md")
+    (worktree / topic_path).parent.mkdir(parents=True)
+    (worktree / topic_path).write_text("temporary topic", encoding="utf-8")
+
+    await archive.discard_unwritten_topic(topic_path)
+
+    assert not (worktree / topic_path).exists()
