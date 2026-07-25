@@ -27,17 +27,17 @@ llm:
     provider: openai-compatible
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
-    model: deepseek-chat
+    model: deepseek-v4-flash
   summarizer:
     provider: openai-compatible
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
-    model: deepseek-chat
+    model: deepseek-v4-flash
   chat:
     provider: openai-compatible
     base_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
-    model: deepseek-chat
+    model: deepseek-v4-flash
 ```
 
 Keep API keys in environment variables, not in `dora-bot.yaml`:

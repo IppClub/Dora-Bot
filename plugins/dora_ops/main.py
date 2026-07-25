@@ -761,6 +761,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                     ]
                 )
             except LLMError:
+                logger.warning("feedback analysis summary failed: job=%s", payload["job_id"], exc_info=True)
                 reply = ""
             if reply.strip():
                 return reply.strip()
@@ -770,8 +771,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     def _format_feedback_analysis_result_fallback(payload: dict[str, object]) -> str:
         status = str(payload.get("status") or "-")
         if status == JobStatus.SUCCEEDED.value:
-            output = str(payload.get("opencode_output") or "分析完成")
-            return f"分析完成：{DoraOpsPlugin._clip(output, 900)}"
+            return "分析已完成，但中文整理服务暂不可用；原始结果已保存，请稍后重试。"
         error = str(payload.get("error") or status)
         return f"分析任务{status}：{DoraOpsPlugin._clip(error, 500)}"
 
@@ -866,6 +866,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                     ]
                 )
             except LLMError:
+                logger.warning("daily progress summary failed: jobs=%s", job_ids, exc_info=True)
                 reply = ""
             if reply.strip():
                 return reply.strip()
@@ -898,19 +899,17 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     @staticmethod
     def _format_progress_results_fallback(entries: list[dict[str, object]]) -> str:
-        lines = ["昨日进展分析结果："]
+        lines = ["昨日进展分析已完成，但中文整理服务暂不可用；本次未转发 OpenCode 原始输出。"]
         for entry in entries:
             repo = str(entry.get("repo") or f"job #{entry.get('job_id')}")
             status = str(entry.get("status") or "-")
             if status == "missing":
-                lines.append(f"- {repo}: missing")
+                lines.append(f"- {repo}: 未找到分析任务")
                 continue
             if status == JobStatus.SUCCEEDED.value:
-                output = str(entry.get("opencode_output") or "分析完成")
-                lines.append(f"- {repo}: {DoraOpsPlugin._clip(output, 600)}")
+                lines.append(f"- {repo}: 分析已完成，等待中文整理")
             elif status in {JobStatus.FAILED.value, JobStatus.TIMEOUT.value}:
-                error = str(entry.get("error") or status)
-                lines.append(f"- {repo}: {status}\n  {DoraOpsPlugin._clip(error, 500)}")
+                lines.append(f"- {repo}: 分析任务{status}")
             else:
                 lines.append(f"- {repo}: {status}")
         return "\n".join(lines)

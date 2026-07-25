@@ -53,7 +53,7 @@ class LLMProfileConfig(BaseModel):
     provider: str = "openai-compatible"
     base_url: str = "https://api.deepseek.com"
     api_key_env: str = "DEEPSEEK_API_KEY"
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     temperature: float = 0.2
     max_tokens: int = 1024
     timeout_seconds: int = 60

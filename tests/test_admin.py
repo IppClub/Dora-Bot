@@ -604,7 +604,7 @@ async def test_progress_results_send_raw_output_to_llm_summary(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_progress_results_fallback_clips_raw_output(tmp_path: Path) -> None:
+async def test_progress_results_fallback_does_not_forward_raw_output(tmp_path: Path) -> None:
     output = tmp_path / "output.json"
     output.write_text(
         """```json
@@ -636,10 +636,11 @@ async def test_progress_results_fallback_clips_raw_output(tmp_path: Path) -> Non
         },
     )
 
-    assert "昨日无提交" in result
-    assert "连续 3 天无提交" in result
-    assert "```json" in result
-    assert '"summary"' in result
+    assert "中文整理服务暂不可用" in result
+    assert "yuescript: 分析已完成，等待中文整理" in result
+    assert "昨日无提交" not in result
+    assert "```json" not in result
+    assert '"summary"' not in result
 
 
 @pytest.mark.asyncio
@@ -697,10 +698,10 @@ async def test_feedback_analysis_watcher_replies_to_group_requester(tmp_path: Pa
 
     await plugin._watch_feedback_analysis_job(job_id, 456, 789)
 
-    assert qq.group_messages == [(456, {"text": " 分析完成：{\"summary\":\"分析完成\"}", "at": 789})]
+    assert qq.group_messages == [(456, {"text": " 分析已完成，但中文整理服务暂不可用；原始结果已保存，请稍后重试。", "at": 789})]
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [message["role"] for message in recent] == ["assistant"]
-    assert recent[0]["content"] == "分析完成：{\"summary\":\"分析完成\"}"
+    assert recent[0]["content"] == "分析已完成，但中文整理服务暂不可用；原始结果已保存，请稍后重试。"
     delivery = await runtime.storage.get_analysis_delivery(job_id)
     assert delivery is None
 
