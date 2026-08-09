@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -15,6 +16,9 @@ class LLMError(RuntimeError):
 
 
 class OpenAICompatibleChatClient:
+    _EMPTY_CONTENT_ATTEMPTS = 3
+    _EMPTY_CONTENT_RETRY_SECONDS = 0.5
+
     def __init__(self, profile: LLMProfileConfig):
         self.profile = profile
 
@@ -31,18 +35,20 @@ class OpenAICompatibleChatClient:
         return await asyncio.to_thread(self._complete_tool_call_sync, messages, tool, tool_name)
 
     def _complete_sync(self, messages: list[dict[str, str]]) -> str:
-        message = self._request_message(
-            {
-                "model": self.profile.model,
-                "messages": messages,
-                "temperature": self.profile.temperature,
-                "max_tokens": self.profile.max_tokens,
-            }
-        )
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise LLMError("LLM 响应内容为空")
-        return content.strip()
+        payload = {
+            "model": self.profile.model,
+            "messages": messages,
+            "temperature": self.profile.temperature,
+            "max_tokens": self.profile.max_tokens,
+        }
+        for attempt in range(self._EMPTY_CONTENT_ATTEMPTS):
+            message = self._request_message(payload)
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if attempt + 1 < self._EMPTY_CONTENT_ATTEMPTS:
+                time.sleep(self._EMPTY_CONTENT_RETRY_SECONDS * (attempt + 1))
+        raise LLMError(f"LLM 响应内容为空（已重试 {self._EMPTY_CONTENT_ATTEMPTS} 次）")
 
     def _complete_tool_call_sync(
         self,
