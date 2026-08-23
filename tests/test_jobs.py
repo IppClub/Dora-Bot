@@ -154,3 +154,17 @@ async def test_missing_tmux_feedback_analysis_fails_and_releases_serial_queue(tm
     assert first_job["error"] == "tmux session ended before writing job completion marker"
     assert second_job["status"] == JobStatus.SUCCEEDED.value
     assert started == [first, second]
+
+
+def test_opencode_invocation_uses_a_shared_lock(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+
+    async def build_command() -> str:
+        runtime = await DoraOpsRuntime.create(config_path)
+        return runtime.jobs._opencode_command(tmp_path / "prompt.md", tmp_path / "output.json")
+
+    command = asyncio.run(build_command())
+    assert "flock -x" in command
+    assert str(tmp_path / "jobs" / ".opencode.lock") in command
+    assert "opencode run" in command

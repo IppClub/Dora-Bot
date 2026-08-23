@@ -77,8 +77,7 @@ class JobManager:
             triggered_by=triggered_by,
             trigger_source="admin_command" if is_test else "repo_tracker",
         )
-        opencode = self.config.jobs.opencode_command
-        command = f"cd {shlex.quote(str(repo_path))} && {opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         if change_id is not None:
             await self.storage.update_repo_change_status(change_id, ChangeStatus.ANALYZING)
@@ -115,8 +114,7 @@ class JobManager:
             triggered_by=triggered_by,
             trigger_source=trigger_source,
         )
-        opencode = self.config.jobs.opencode_command
-        command = f"cd {shlex.quote(str(repo_path))} && {opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
         asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
         return job_id
 
@@ -148,7 +146,7 @@ class JobManager:
             done_path=done,
             trigger_source="topic_review",
         )
-        command = f"cd {shlex.quote(str(repo_path))} && {self.config.jobs.opencode_command} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         return job_id
 
@@ -180,8 +178,7 @@ class JobManager:
         exit_code = Path(str(job["exit_code_path"]))
         done = Path(str(job["done_path"]))
         session = str(job["tmux_session"])
-        opencode = self.config.jobs.opencode_command
-        command = f"cd {shlex.quote(str(repo_path))} && {opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
         asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
 
     async def create_yesterday_progress_analysis(
@@ -217,11 +214,10 @@ class JobManager:
             triggered_by=triggered_by,
             trigger_source=trigger_source,
         )
-        opencode = self.config.jobs.opencode_command
         command = (
             f"cd {shlex.quote(str(repo_path))} && "
             f"git pull -f origin {shlex.quote(branch)} && "
-            f"{opencode} < {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+            f"{self._opencode_command(prompt, output)}"
         )
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         return job_id
@@ -279,6 +275,20 @@ class JobManager:
             except FileExistsError:
                 continue
         raise RuntimeError(f"failed to allocate job directory for {prefix}")
+
+    def _opencode_command(self, prompt: Path, output: Path) -> str:
+        """Build an invocation that serializes OpenCode's shared state migrations.
+
+        OpenCode keeps its session and migration database outside each repository.
+        Concurrent invocations can therefore race while applying a newly released
+        migration, even when the Bot jobs target different repositories.
+        """
+        job_root = resolve_path(self.base_dir, self.config.paths.job_dir)
+        lock_path = job_root / ".opencode.lock"
+        return (
+            f"flock -x {shlex.quote(str(lock_path))} -- {self.config.jobs.opencode_command} "
+            f"< {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+        )
 
     async def _start_tmux_job(
         self,
