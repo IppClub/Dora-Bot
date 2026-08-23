@@ -286,7 +286,7 @@ class JobManager:
         job_root = resolve_path(self.base_dir, self.config.paths.job_dir)
         lock_path = job_root / ".opencode.lock"
         return (
-            f"flock -x {shlex.quote(str(lock_path))} -- {self.config.jobs.opencode_command} "
+            f"flock -x {shlex.quote(str(lock_path))} {self.config.jobs.opencode_command} "
             f"< {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
         )
 

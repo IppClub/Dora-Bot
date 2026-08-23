@@ -167,4 +167,5 @@ def test_opencode_invocation_uses_a_shared_lock(tmp_path: Path) -> None:
     command = asyncio.run(build_command())
     assert "flock -x" in command
     assert str(tmp_path / "jobs" / ".opencode.lock") in command
+    assert " -- " not in command
     assert "opencode run" in command
