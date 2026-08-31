@@ -15,6 +15,7 @@ def repo_diff_prompt(
     return f"""You are analyzing repository changes for {repo_name}.
 
 Run in read-only mode. Do not edit files. Do not run destructive commands.
+Do all investigation in this foreground session. Do not delegate to sub-agents or finish while waiting for another task.
 
 Analyze the change range:
 - old head: {old}
@@ -55,6 +56,7 @@ def feedback_analysis_prompt(
     return f"""You are analyzing a community feedback item for {repo_name}.
 
 Run in read-only mode. Do not edit files. Do not run destructive commands.
+Do all investigation in this foreground session. Do not delegate to sub-agents or finish while waiting for another task.
 
 Feedback metadata:
 - project: {project or repo_name}
@@ -124,6 +126,7 @@ Rules:
 - Only write the specified design Markdown file; the Bot will validate, commit and push the archive repository.
 - This is a file-producing task, not a chat-only analysis: use your file-write tool to create the specified design file before responding.
 - Before finishing, verify that the exact design path exists and is non-empty. Do not finish with only an explanation of your analysis.
+- Do all investigation in this foreground session. Do not delegate to sub-agents or finish while waiting for another task.
 """
 
 
@@ -132,6 +135,7 @@ def yesterday_progress_prompt(*, repo_name: str, branch: str, timezone: str) -> 
 
 The repository has already been updated with `git pull -f origin {branch}` before this prompt runs.
 Run in read-only mode. Do not edit files. Do not run destructive commands.
+Do all investigation in this foreground session. Do not delegate to sub-agents or finish while waiting for another task.
 
 Analyze yesterday's repository changes in timezone {timezone}:
 - from yesterday 00:00

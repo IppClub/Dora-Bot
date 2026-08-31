@@ -335,6 +335,7 @@ class TopicReviewService:
         )
         job_id = await self.jobs.create_topic_design(
             repo_key=repo_key, repo_path=repo_path, ticket_id=int(ticket["id"]), prompt_text=prompt,
+            expected_design_path=self.archive.root / design_path,
         )
         await self.jobs.wait_for_job(job_id)
         try:

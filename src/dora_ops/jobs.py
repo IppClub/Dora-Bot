@@ -77,7 +77,7 @@ class JobManager:
             triggered_by=triggered_by,
             trigger_source="admin_command" if is_test else "repo_tracker",
         )
-        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(job_id, prompt, output, expect='json')}"
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         if change_id is not None:
             await self.storage.update_repo_change_status(change_id, ChangeStatus.ANALYZING)
@@ -114,7 +114,7 @@ class JobManager:
             triggered_by=triggered_by,
             trigger_source=trigger_source,
         )
-        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(job_id, prompt, output, expect='json')}"
         asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
         return job_id
 
@@ -125,6 +125,7 @@ class JobManager:
         repo_path: Path,
         ticket_id: int,
         prompt_text: str,
+        expected_design_path: Path,
     ) -> int:
         job_dir = self._next_job_dir("topic_design")
         prompt = job_dir / "prompt.md"
@@ -146,7 +147,10 @@ class JobManager:
             done_path=done,
             trigger_source="topic_review",
         )
-        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
+        command = (
+            f"cd {shlex.quote(str(repo_path))} && "
+            f"{self._opencode_command(job_id, prompt, output, expect='file', expected_file=expected_design_path)}"
+        )
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         return job_id
 
@@ -178,7 +182,7 @@ class JobManager:
         exit_code = Path(str(job["exit_code_path"]))
         done = Path(str(job["done_path"]))
         session = str(job["tmux_session"])
-        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(prompt, output)}"
+        command = f"cd {shlex.quote(str(repo_path))} && {self._opencode_command(job_id, prompt, output, expect='json')}"
         asyncio.create_task(self._run_serial_analysis_job(job_id, session, command, error, exit_code, done))
 
     async def create_yesterday_progress_analysis(
@@ -217,7 +221,7 @@ class JobManager:
         command = (
             f"cd {shlex.quote(str(repo_path))} && "
             f"git pull -f origin {shlex.quote(branch)} && "
-            f"{self._opencode_command(prompt, output)}"
+            f"{self._opencode_command(job_id, prompt, output, expect='json')}"
         )
         await self._start_tmux_job(job_id, session, command, error, exit_code, done)
         return job_id
@@ -276,7 +280,15 @@ class JobManager:
                 continue
         raise RuntimeError(f"failed to allocate job directory for {prefix}")
 
-    def _opencode_command(self, prompt: Path, output: Path) -> str:
+    def _opencode_command(
+        self,
+        job_id: int,
+        prompt: Path,
+        output: Path,
+        *,
+        expect: str,
+        expected_file: Path | None = None,
+    ) -> str:
         """Build an invocation that serializes OpenCode's shared state migrations.
 
         OpenCode keeps its session and migration database outside each repository.
@@ -285,9 +297,13 @@ class JobManager:
         """
         job_root = resolve_path(self.base_dir, self.config.paths.job_dir)
         lock_path = job_root / ".opencode.lock"
+        runner = self.base_dir / "scripts" / "run_opencode_job.py"
+        expected_file_arg = f" --expected-file {shlex.quote(str(expected_file))}" if expected_file else ""
         return (
-            f"flock -x {shlex.quote(str(lock_path))} {self.config.jobs.opencode_command} "
-            f"< {shlex.quote(str(prompt))} > {shlex.quote(str(output))}"
+            f"flock -x {shlex.quote(str(lock_path))} python3 {shlex.quote(str(runner))} "
+            f"--opencode-command {shlex.quote(self.config.jobs.opencode_command)} --job-id {job_id} "
+            f"--prompt {shlex.quote(str(prompt))} --output {shlex.quote(str(output))} --expect {shlex.quote(expect)}"
+            f"{expected_file_arg}"
         )
 
     async def _start_tmux_job(

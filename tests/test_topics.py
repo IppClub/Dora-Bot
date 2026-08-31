@@ -21,7 +21,7 @@ class _FakeTopicDesignJobs:
         self.topic_markdown = ""
         self.prompt = ""
 
-    async def create_topic_design(self, *, repo_key: str, repo_path: Path, ticket_id: int, prompt_text: str) -> int:
+    async def create_topic_design(self, *, repo_key: str, repo_path: Path, ticket_id: int, prompt_text: str, expected_design_path: Path) -> int:
         assert repo_key == "dora_ssr"
         assert ticket_id == 1
         self.repo_path = repo_path

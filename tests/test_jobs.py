@@ -1,5 +1,7 @@
 from pathlib import Path
 import asyncio
+import subprocess
+import sys
 
 import pytest
 
@@ -162,10 +164,58 @@ def test_opencode_invocation_uses_a_shared_lock(tmp_path: Path) -> None:
 
     async def build_command() -> str:
         runtime = await DoraOpsRuntime.create(config_path)
-        return runtime.jobs._opencode_command(tmp_path / "prompt.md", tmp_path / "output.json")
+        return runtime.jobs._opencode_command(123, tmp_path / "prompt.md", tmp_path / "output.json", expect="json")
 
     command = asyncio.run(build_command())
     assert "flock -x" in command
     assert str(tmp_path / "jobs" / ".opencode.lock") in command
     assert " -- " not in command
+    assert "run_opencode_job.py" in command
     assert "opencode run" in command
+
+
+def test_opencode_runner_continues_the_same_session_until_json_is_returned(tmp_path: Path) -> None:
+    database = tmp_path / "opencode.db"
+    fake = tmp_path / "fake_opencode.py"
+    fake.write_text(
+        '''#!/usr/bin/env python3
+import sqlite3
+import sys
+from pathlib import Path
+
+root = Path(__file__).parent
+database = root / "opencode.db"
+if sys.argv[1:3] == ["db", "path"]:
+    print(database)
+elif sys.argv[1] == "run":
+    if "--title" in sys.argv:
+        title = sys.argv[sys.argv.index("--title") + 1]
+        with sqlite3.connect(database) as connection:
+            connection.execute("create table if not exists session (id text, title text, time_created integer)")
+            connection.execute("insert into session values (?, ?, ?)", ("ses_test", title, 1))
+        print("I launched an explore agent. Waiting for results.")
+    else:
+        assert sys.argv[sys.argv.index("--session") + 1] == "ses_test"
+        print('{"summary":"final result"}')
+else:
+    raise SystemExit(9)
+''',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    prompt = tmp_path / "prompt.md"
+    output = tmp_path / "output.json"
+    prompt.write_text("test", encoding="utf-8")
+    runner = Path(__file__).parents[1] / "scripts" / "run_opencode_job.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(runner), "--opencode-command", f"{fake} run", "--job-id", "42",
+            "--prompt", str(prompt), "--output", str(output), "--expect", "json",
+            "--max-continuations", "1",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert output.read_text(encoding="utf-8") == '{"summary":"final result"}\n'
