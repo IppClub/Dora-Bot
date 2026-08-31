@@ -616,8 +616,28 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
 
     async def _send_daily_progress_result_to_groups(self, text: str) -> None:
         for group_id in self._daily_summary_group_ids():
-            await self._send_group_reply(group_id, text)
-            await self._record_group_assistant_message(group_id, text)
+            for attempt in range(3):
+                try:
+                    await self._send_group_reply(group_id, text)
+                except Exception:
+                    if attempt == 2:
+                        logger.exception(
+                            "daily progress notification failed after retries: group=%s",
+                            group_id,
+                        )
+                        raise
+                    delay_seconds = attempt + 1
+                    logger.warning(
+                        "daily progress notification failed; retrying: group=%s attempt=%s delay=%ss",
+                        group_id,
+                        attempt + 1,
+                        delay_seconds,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(delay_seconds)
+                else:
+                    await self._record_group_assistant_message(group_id, text)
+                    break
 
     async def _maybe_send_topic_review_to_group(self, command: str, result: str) -> None:
         match = re.fullmatch(r"/topic\s+review\s+(ds\d+)\s+--notify-group\s*", command.strip(), re.IGNORECASE)

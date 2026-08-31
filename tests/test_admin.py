@@ -434,6 +434,40 @@ async def test_daily_progress_group_send_records_chat_history(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_daily_progress_group_send_retries_transient_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class RetryQQAPI(FakeQQAPI):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        async def post_group_msg(self, group_id, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("temporary QQ timeout")
+            await super().post_group_msg(group_id, **kwargs)
+
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    runtime.config.scheduler.daily_summary_group_ids.add(456)
+    plugin = object.__new__(DoraOpsPlugin)
+    qq = RetryQQAPI()
+    plugin.api = SimpleNamespace(qq=qq)
+    plugin.runtime = runtime
+
+    async def no_wait(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(plugin_module.asyncio, "sleep", no_wait)
+    await plugin._send_daily_progress_result_to_groups("日报")
+
+    assert qq.calls == 2
+    assert qq.group_messages == [(456, {"text": "日报"})]
+    recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
+    assert recent[0]["content"] == "日报"
+
+
+@pytest.mark.asyncio
 async def test_daily_topic_review_sends_each_document_link_to_ticket_group() -> None:
     class FakeTopicReviews:
         async def review_yesterday(self):
