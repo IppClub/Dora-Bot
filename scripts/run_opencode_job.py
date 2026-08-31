@@ -43,9 +43,9 @@ def _json_object(text: str) -> bool:
     return False
 
 
-def _database_path(command: list[str]) -> Path | None:
+def _database_path(command: list[str], environment: dict[str, str]) -> Path | None:
     executable = command[0]
-    proc = subprocess.run([executable, "db", "path"], text=True, capture_output=True, check=False)
+    proc = subprocess.run([executable, "db", "path"], text=True, capture_output=True, check=False, env=environment)
     if proc.returncode == 0:
         candidate = Path(proc.stdout.strip())
         if candidate.is_file():
@@ -55,8 +55,8 @@ def _database_path(command: list[str]) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _session_id(command: list[str], title: str) -> str | None:
-    database = _database_path(command)
+def _session_id(command: list[str], title: str, environment: dict[str, str]) -> str | None:
+    database = _database_path(command, environment)
     if database is None:
         return None
     try:
@@ -76,11 +76,11 @@ def _file_signature(path: Path | None) -> tuple[int, int] | None:
     return stat.st_mtime_ns, stat.st_size
 
 
-def _run(command: list[str], *, stdin: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run(command: list[str], *, stdin: Path | None = None, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
     if stdin is None:
-        return subprocess.run(command, text=True, capture_output=True, check=False)
+        return subprocess.run(command, text=True, capture_output=True, check=False, env=environment)
     with stdin.open("r", encoding="utf-8") as source:
-        return subprocess.run(command, text=True, stdin=source, capture_output=True, check=False)
+        return subprocess.run(command, text=True, stdin=source, capture_output=True, check=False, env=environment)
 
 
 def main() -> int:
@@ -91,6 +91,8 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expect", choices=("json", "file"), required=True)
     parser.add_argument("--expected-file", type=Path)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--agent", required=True)
     parser.add_argument("--max-continuations", type=int, default=3)
     args = parser.parse_args()
     if args.expect == "file" and args.expected_file is None:
@@ -102,8 +104,10 @@ def main() -> int:
     title = f"dora-bot-job-{args.job_id}"
     attempts: list[str] = []
     initial_file_signature = _file_signature(args.expected_file)
+    environment = os.environ.copy()
+    environment["OPENCODE_CONFIG"] = str(args.config)
 
-    initial = _run([*command, "--title", title], stdin=args.prompt)
+    initial = _run([*command, "--agent", args.agent, "--title", title], stdin=args.prompt, environment=environment)
     attempts.append(initial.stdout)
     if initial.stderr:
         sys.stderr.write(initial.stderr)
@@ -111,7 +115,7 @@ def main() -> int:
         args.output.write_text(initial.stdout, encoding="utf-8")
         return initial.returncode
 
-    session_id = _session_id(command, title)
+    session_id = _session_id(command, title, environment)
     for attempt in range(args.max_continuations + 1):
         latest = attempts[-1]
         complete = _json_object(latest) if args.expect == "json" else bool(
@@ -126,7 +130,7 @@ def main() -> int:
         if not session_id:
             break
         time.sleep(min(5 * (attempt + 1), 15))
-        resumed = _run([*command, "--session", session_id, CONTINUE_PROMPT])
+        resumed = _run([*command, "--session", session_id, CONTINUE_PROMPT], environment=environment)
         attempts.append(resumed.stdout)
         if resumed.stderr:
             sys.stderr.write(resumed.stderr)

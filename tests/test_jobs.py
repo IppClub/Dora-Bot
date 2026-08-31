@@ -172,6 +172,7 @@ def test_opencode_invocation_uses_a_shared_lock(tmp_path: Path) -> None:
     assert " -- " not in command
     assert "run_opencode_job.py" in command
     assert "opencode run" in command
+    assert "dora-bot-analysis" in command
 
 
 def test_opencode_runner_continues_the_same_session_until_json_is_returned(tmp_path: Path) -> None:
@@ -211,6 +212,7 @@ else:
         [
             sys.executable, str(runner), "--opencode-command", f"{fake} run", "--job-id", "42",
             "--prompt", str(prompt), "--output", str(output), "--expect", "json",
+            "--config", str(tmp_path / "opencode-bot.json"), "--agent", "dora-bot-analysis",
             "--max-continuations", "1",
         ],
         text=True,

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "dora-bot-analysis": {
+      "description": "Read-only repository analysis for Dora Bot automation",
+      "mode": "primary",
+      "permission": {
+        "task": "deny",
+        "edit": "deny"
+      }
+    },
+    "dora-bot-design": {
+      "description": "Topic design document generation for Dora Bot automation",
+      "mode": "primary",
+      "permission": {
+        "task": "deny",
+        "edit": "allow"
+      }
+    }
+  }
+}

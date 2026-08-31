@@ -298,11 +298,14 @@ class JobManager:
         job_root = resolve_path(self.base_dir, self.config.paths.job_dir)
         lock_path = job_root / ".opencode.lock"
         runner = self.base_dir / "scripts" / "run_opencode_job.py"
+        opencode_config = self.base_dir / "config" / "opencode-bot.json"
+        agent = "dora-bot-design" if expect == "file" else "dora-bot-analysis"
         expected_file_arg = f" --expected-file {shlex.quote(str(expected_file))}" if expected_file else ""
         return (
             f"flock -x {shlex.quote(str(lock_path))} python3 {shlex.quote(str(runner))} "
             f"--opencode-command {shlex.quote(self.config.jobs.opencode_command)} --job-id {job_id} "
-            f"--prompt {shlex.quote(str(prompt))} --output {shlex.quote(str(output))} --expect {shlex.quote(expect)}"
+            f"--prompt {shlex.quote(str(prompt))} --output {shlex.quote(str(output))} --expect {shlex.quote(expect)} "
+            f"--config {shlex.quote(str(opencode_config))} --agent {shlex.quote(agent)}"
             f"{expected_file_arg}"
         )
 
