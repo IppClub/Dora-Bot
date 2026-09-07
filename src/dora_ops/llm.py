@@ -41,14 +41,19 @@ class OpenAICompatibleChatClient:
             "temperature": self.profile.temperature,
             "max_tokens": self.profile.max_tokens,
         }
+        finish_reason = ""
         for attempt in range(self._EMPTY_CONTENT_ATTEMPTS):
-            message = self._request_message(payload)
+            message, finish_reason = self._request_choice(payload)
             content = message.get("content")
             if isinstance(content, str) and content.strip():
                 return content.strip()
             if attempt + 1 < self._EMPTY_CONTENT_ATTEMPTS:
                 time.sleep(self._EMPTY_CONTENT_RETRY_SECONDS * (attempt + 1))
-        raise LLMError(f"LLM 响应内容为空（已重试 {self._EMPTY_CONTENT_ATTEMPTS} 次）")
+        raise LLMError(
+            "LLM 响应内容为空"
+            f"（已重试 {self._EMPTY_CONTENT_ATTEMPTS} 次，finish_reason={finish_reason or 'unknown'}）；"
+            "若 finish_reason=length，说明推理模型的思考耗尽了 max_tokens，需调大该 profile 的 max_tokens"
+        )
 
     def _complete_tool_call_sync(
         self,
@@ -85,6 +90,10 @@ class OpenAICompatibleChatClient:
         raise LLMError("LLM 响应缺少工具调用参数")
 
     def _request_message(self, payload: dict[str, Any]) -> dict[str, Any]:
+        message, _ = self._request_choice(payload)
+        return message
+
+    def _request_choice(self, payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
         api_key = os.environ.get(self.profile.api_key_env)
         if not api_key:
             raise LLMError(f"缺少环境变量：{self.profile.api_key_env}")
@@ -111,7 +120,8 @@ class OpenAICompatibleChatClient:
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
             raise LLMError("LLM 响应缺少 choices")
-        message = choices[0].get("message")
+        choice = choices[0]
+        message = choice.get("message")
         if not isinstance(message, dict):
             raise LLMError("LLM 响应缺少 message")
-        return message
+        return message, str(choice.get("finish_reason") or "")

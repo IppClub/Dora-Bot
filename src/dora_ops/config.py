@@ -55,7 +55,9 @@ class LLMProfileConfig(BaseModel):
     api_key_env: str = "DEEPSEEK_API_KEY"
     model: str = "deepseek-v4-flash"
     temperature: float = 0.2
-    max_tokens: int = 1024
+    # deepseek-v4-flash 是推理模型，思考 token 计入 max_tokens；
+    # 上限过小时思考会耗尽预算，content 返回空（finish_reason=length）。
+    max_tokens: int = 4096
     timeout_seconds: int = 60
 
 
