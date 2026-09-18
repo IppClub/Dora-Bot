@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "zhipuai-coding-plan/glm-5.3",
   "agent": {
     "dora-bot-analysis": {
       "description": "Read-only repository analysis for Dora Bot automation",
