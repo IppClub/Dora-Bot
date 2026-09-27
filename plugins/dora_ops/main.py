@@ -29,6 +29,8 @@ PROGRESS_JOB_PATTERN = re.compile(r"job #(\d+)")
 PROGRESS_SESSION_PATTERN = re.compile(r"dora_job_\d+_(.+)_progress$")
 APPROVED_FEEDBACK_JOB_PATTERN = re.compile(r"分析任务已创建：#(\d+)")
 TOPIC_REVIEW_COMMAND_PATTERN = re.compile(r"/topic\s+review\s+(ds\d+)(?:\s+(--notify-group))?\s*", re.IGNORECASE)
+CQ_CODE_PATTERN = re.compile(r"\[CQ:[^\]]+\]", re.IGNORECASE)
+CQ_FILE_PATTERN = re.compile(r"\[CQ:file(?:,|\])", re.IGNORECASE)
 logger = get_log("DoraOps") if get_log is not None else logging.getLogger(__name__)
 
 
@@ -283,6 +285,13 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         bot_user_id: str = "",
         mentions: tuple[GroupMention, ...] = (),
     ) -> None:
+        if self._should_skip_group_message_text(text):
+            logger.info(
+                "group message skipped before debounce: group=%s user=%s reason=attachment_only",
+                group_id,
+                user_id,
+            )
+            return
         if not hasattr(self, "_pending_group_messages"):
             self._pending_group_messages = {}
         pending = self._pending_group_messages.get(group_id)
@@ -313,6 +322,15 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
             pending.mentions_bot,
         )
         pending.task = asyncio.create_task(self._flush_group_message_after_delay(group_id, delay))
+
+    @staticmethod
+    def _should_skip_group_message_text(text: str) -> bool:
+        stripped = str(text or "").strip()
+        if not stripped:
+            return True
+        if not CQ_FILE_PATTERN.search(stripped):
+            return False
+        return not CQ_CODE_PATTERN.sub("", stripped).strip()
 
     async def _flush_group_message_after_delay(self, group_id: int, delay: float) -> None:
         try:

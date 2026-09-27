@@ -327,6 +327,38 @@ async def test_plugin_debounces_group_messages_as_buffered_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_plugin_skips_attachment_only_group_file_before_debounce() -> None:
+    plugin = object.__new__(DoraOpsPlugin)
+    runtime = FakeDebounceRuntime()
+    plugin.runtime = runtime
+    plugin._pending_group_messages = {}
+
+    await plugin._enqueue_group_message(
+        group_id=456,
+        user_id=1,
+        nickname="uploader",
+        text=(
+            "[CQ:file,file=dora-ssr-v1.9.3-linux-x86_64.AppImage,"
+            "file_id=/example,file_size=66759160,url=https://example.invalid/release]"
+        ),
+        mentions_bot=False,
+    )
+    await asyncio.sleep(0)
+
+    assert runtime.messages == []
+    assert plugin._pending_group_messages == {}
+
+
+def test_plugin_keeps_group_file_message_when_user_includes_text() -> None:
+    assert DoraOpsPlugin._should_skip_group_message_text(
+        "这个包启动时报错 [CQ:file,file=dora-ssr.AppImage,file_id=/example]"
+    ) is False
+    assert DoraOpsPlugin._should_skip_group_message_text(
+        "[CQ:file,file=dora-ssr.AppImage,file_id=/example] 请帮我排查白屏"
+    ) is False
+
+
+@pytest.mark.asyncio
 async def test_plugin_sends_group_feedback_notifications_to_admins() -> None:
     plugin = object.__new__(DoraOpsPlugin)
     qq = FakeQQAPI()
