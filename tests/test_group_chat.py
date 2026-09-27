@@ -564,6 +564,8 @@ async def test_group_chat_llm_can_reply_when_mentioned(tmp_path: Path) -> None:
     assert "禁止出现类似“（叹气）”“（探头）”“（抬眼）”“（坏笑）”“（小声）”这样的写法" in system_prompt
     assert "/test daily-summary --progress" not in system_prompt
     assert "/approve feedback <id>" not in system_prompt
+    assert "绝不提管理员、审批、反馈编号、任务编号、仓库分析流程或其他后台操作" in system_prompt
+    assert "应提示需要管理员审批" not in system_prompt
     assert "不能假装已经执行命令" in system_prompt
     assert "# 能力触发规则" in system_prompt
     assert "应交给仓库分析流程，不要用聊天模型直接回答" in system_prompt
