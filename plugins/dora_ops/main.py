@@ -812,6 +812,7 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
                                 "- 输入里的 opencode_output 是原始文本，可能是 JSON、Markdown 或普通文本，不要依赖固定 schema。\n"
                                 "- 只输出中文总结，不输出 JSON、Markdown 代码块或原始字段名。\n"
                                 "- 说明判断、可能原因、需要补充的信息和下一步建议；失败或超时要明确说明。\n"
+                                "- 按本次结果直接回答技术问题；下一步建议应是用户可执行的排查或补充信息动作。\n"
                                 "- 控制在 5 条以内，语气保持多萝人格，但不要影响信息准确性。"
                             ),
                         },

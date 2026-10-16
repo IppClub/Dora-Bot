@@ -806,9 +806,7 @@ async def test_admin_private_chat_records_feedback_and_approval(tmp_path: Path) 
 
     result = await runtime.handle_admin_text("Dora SSR Web IDE 创建文件后无法刷新", user_id=123)
     assert result is not None
-    assert "已记录为 #1" in result
-    assert "/approve feedback 1" in result
-    assert "审批 #1" in result
+    assert result == "反馈已记录。"
 
     feedback = await runtime.storage.get_feedback(1)
     assert feedback is not None
@@ -884,7 +882,7 @@ async def test_admin_private_chat_uses_limited_llm_context(tmp_path: Path) -> No
     assert "# 聊天风格限制" in system_prompt
     assert "多萝是在 QQ 群里聊天，不是在写小说、剧本、轻小说或角色扮演小剧场" in system_prompt
     assert "禁止出现类似“（叹气）”“（探头）”“（抬眼）”“（坏笑）”“（小声）”这样的写法" in system_prompt
-    assert "/approve feedback <id>" in system_prompt
+    assert "本轮系统记录是实际操作状态的依据" in system_prompt
     assert "/test daily-summary --progress" in system_prompt
     assert "# 能力触发规则" in system_prompt
     assert "先确认具体目标和必要上下文，只引用系统已经提供的可靠结果" in system_prompt
@@ -947,8 +945,7 @@ async def test_admin_private_project_question_records_without_llm_reply(tmp_path
     result = await runtime.handle_admin_text("Dora SSR 渲染管线怎么拆比较稳", user_id=123)
 
     assert result is not None
-    assert "已记录为 #1" in result
-    assert "/approve feedback 1" in result
+    assert result == "反馈已记录。"
     assert chat.calls == []
     feedback = await runtime.storage.get_feedback(1)
     assert feedback is not None

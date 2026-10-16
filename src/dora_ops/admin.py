@@ -405,7 +405,7 @@ class AdminCommands:
             command=f"/approve feedback {feedback_id}",
         )
         logger.info("admin private feedback recorded: user=%s feedback=%s approval=%s repo_analysis=true", user_id, feedback_id, approval_id)
-        return f"已记录为 #{feedback_id}，可发送 /approve feedback {feedback_id} 批准深度分析。审批 #{approval_id}。"
+        return "反馈已记录。"
 
     @staticmethod
     def _clip_log(text: str, limit: int = 160) -> str:
@@ -430,7 +430,7 @@ class AdminCommands:
         if not classification.needs_repo_analysis:
             return f"收到，{side_effect_note or '已记录。'}"
 
-        return f"收到，这个像是 {classification.project or '项目'} 的有效问题，{side_effect_note or '可批准深度分析。'}"
+        return side_effect_note or "请补充具体问题和相关现象。"
 
     async def _llm_private_chat_reply(self, conversation_key: str, *, side_effect_note: str | None) -> str:
         assert self.chat_client is not None
@@ -444,9 +444,9 @@ class AdminCommands:
                 "content": (
                     f"{DORA_PERSONA_PROMPT}\n\n"
                     "# 私聊任务规则\n"
-                    "- 你正在和管理员私聊，继续使用多萝人格，但优先清楚处理维护事务。\n"
-                    "- 使用简洁中文回复管理员。\n"
-                    "- 可以帮助记录反馈、说明 /approvals、/approve feedback <id>、/reject feedback <id> 等审批命令。\n"
+                    "- 你正在私聊中回应用户，使用简洁中文直接处理当前问题。\n"
+                    "- 本轮系统记录是实际操作状态的依据；历史对话用于理解问题背景。\n"
+                    "- 信息充分时回答具体问题，信息不足时追问最关键的细节。\n"
                     "- 可以说明 /test ping、/test group-chat、/test opencode、/test daily-summary --progress、/test job-status --include-test 等测试命令的用途。\n"
                     "- 不要声称已经执行未执行的操作。"
                 ),
