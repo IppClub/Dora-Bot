@@ -63,6 +63,15 @@ jobs:
 llm:
   enabled: false
   max_context_messages: 20
+  # QQ 图片会先转为中文观察记录，再进入对话上下文。
+  vision:
+    enabled: true
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    model: deepseek-flash
+    max_images: 4
+    max_tokens: 4096
+    timeout_seconds: 60
   # deepseek-v4-flash 是推理模型，思考 token 计入 max_tokens，
   # 上限过小时思考会耗尽预算，content 返回空（finish_reason=length）。
   classifier:

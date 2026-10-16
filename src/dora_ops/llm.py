@@ -22,7 +22,7 @@ class OpenAICompatibleChatClient:
     def __init__(self, profile: LLMProfileConfig):
         self.profile = profile
 
-    async def complete(self, messages: list[dict[str, str]]) -> str:
+    async def complete(self, messages: list[dict[str, Any]]) -> str:
         return await asyncio.to_thread(self._complete_sync, messages)
 
     async def complete_tool_call(
@@ -34,7 +34,7 @@ class OpenAICompatibleChatClient:
     ) -> dict[str, Any]:
         return await asyncio.to_thread(self._complete_tool_call_sync, messages, tool, tool_name)
 
-    def _complete_sync(self, messages: list[dict[str, str]]) -> str:
+    def _complete_sync(self, messages: list[dict[str, Any]]) -> str:
         payload = {
             "model": self.profile.model,
             "messages": messages,

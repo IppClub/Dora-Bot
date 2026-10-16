@@ -295,6 +295,29 @@ async def test_plugin_resolves_raw_cq_mentions_with_group_member_info() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("raw,segments", [
+    ("[CQ:image,file=image.jpg,url=https://example.org/a.png]", []),
+    ("看看截图", [{"type": "image", "data": {"url": "https://example.org/a.png"}}]),
+])
+async def test_plugin_passes_qq_images_to_vision(raw, segments):
+    calls = []
+
+    async def describe(text, urls):
+        calls.append((text, urls))
+        return "图片中有报错"
+
+    plugin = object.__new__(DoraOpsPlugin)
+    plugin.runtime = SimpleNamespace(
+        config=SimpleNamespace(group_chat=SimpleNamespace(enabled=True, enabled_group_ids={456})),
+        vision=SimpleNamespace(describe=describe),
+    )
+    msg = SimpleNamespace(raw_message=raw, message=segments)
+    text, _ = await plugin._group_message_text_and_mentions(456, msg)
+    assert text == "图片中有报错"
+    assert calls[0][1] == ["https://example.org/a.png"]
+
+
+@pytest.mark.asyncio
 async def test_plugin_sends_messages_through_ncatbot_qq_api() -> None:
     plugin = object.__new__(DoraOpsPlugin)
     qq = FakeQQAPI()

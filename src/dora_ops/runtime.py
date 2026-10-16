@@ -12,6 +12,7 @@ from .storage import Storage
 from .summary import SummaryService
 from .topics import TopicReviewService, TopicService
 from .welcome import WelcomeMember, WelcomeService
+from .vision import VisionService
 
 
 class DoraOpsRuntime:
@@ -23,6 +24,7 @@ class DoraOpsRuntime:
         self.jobs = JobManager(base_dir, config, storage)
         self.summaries = SummaryService(base_dir, config, storage)
         self.welcome = WelcomeService(config)
+        self.vision = VisionService(config.llm)
         chat_client = OpenAICompatibleChatClient(config.llm.chat) if config.llm.enabled else None
         classifier_client = OpenAICompatibleChatClient(config.llm.classifier) if config.llm.enabled else None
         planner_client = OpenAICompatibleChatClient(config.llm.summarizer) if config.llm.enabled else None

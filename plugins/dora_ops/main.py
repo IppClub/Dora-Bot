@@ -149,6 +149,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         async def on_private_message(self, event) -> None:
             text = self._message_text(event)
             user_id = int(getattr(event, "user_id", 0))
+            if user_id in self.runtime.config.admin.user_ids:
+                text = await self._with_image_observations(event, text)
             logger.info("private message received: user=%s text=%r", user_id, self._clip_log(text))
             if await self._start_private_topic_review(text, user_id, lambda message: event.reply(text=message)):
                 return
@@ -195,6 +197,8 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
         async def on_private_message(self, msg) -> None:
             text = self._message_text(msg)
             user_id = int(getattr(msg, "user_id", 0))
+            if user_id in self.runtime.config.admin.user_ids:
+                text = await self._with_image_observations(msg, text)
             logger.info("private message received: user=%s text=%r", user_id, self._clip_log(text))
             if await self._start_private_topic_review(text, user_id, lambda message: self._send_private_reply(user_id, message)):
                 return
@@ -403,10 +407,26 @@ class DoraOpsPlugin(NcatBotPlugin):  # type: ignore[misc,valid-type]
     async def _group_message_text_and_mentions(self, group_id: int, msg) -> tuple[str, tuple[GroupMention, ...]]:
         raw = str(getattr(msg, "raw_message", "") or "")
         mentions = await self._resolve_mentions(group_id, self._mentions(msg))
-        if raw and "[CQ:" not in raw:
-            return raw, mentions
         rendered = self._render_message(msg, raw=raw, mentions=mentions)
-        return str(rendered or raw or getattr(msg, "text", "") or ""), mentions
+        text = raw if raw and "[CQ:" not in raw else str(rendered or raw or getattr(msg, "text", "") or "")
+        config = self.runtime.config.group_chat if hasattr(self, "runtime") else None
+        if config and config.enabled and (not config.enabled_group_ids or group_id in config.enabled_group_ids):
+            text = await self._with_image_observations(msg, text)
+        return text, mentions
+
+    async def _with_image_observations(self, msg, text: str) -> str:
+        raw = str(getattr(msg, "raw_message", "") or "")
+        segments = self._message_segments(msg, raw=raw)
+        images = [item for item in segments if self._segment_type(item) == "image"]
+        if not images:
+            return text
+        # Render only text/mentions; raw CQ metadata is transport, not user prose.
+        text = CQ_CODE_PATTERN.sub("", text).strip()
+        urls = []
+        for item in images:
+            data = self._segment_data(item)
+            urls.append(str(data.get("url") or data.get("file") or ""))
+        return await self.runtime.vision.describe(text, urls)
 
     @staticmethod
     def _render_message(msg, *, raw: str = "", mentions: tuple[GroupMention, ...] = ()) -> str:

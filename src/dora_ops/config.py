@@ -61,11 +61,18 @@ class LLMProfileConfig(BaseModel):
     timeout_seconds: int = 60
 
 
+class VisionConfig(LLMProfileConfig):
+    enabled: bool = True
+    model: str = "deepseek-flash"
+    max_images: int = Field(default=4, ge=1, le=8)
+
+
 class LLMConfig(BaseModel):
     enabled: bool = False
     classifier: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
     summarizer: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
     chat: LLMProfileConfig = Field(default_factory=LLMProfileConfig)
+    vision: VisionConfig = Field(default_factory=VisionConfig)
     max_context_messages: int = Field(default=20, ge=1)
 
 
