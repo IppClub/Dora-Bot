@@ -110,6 +110,15 @@ class FakePlannerClient:
         return self.result
 
 
+def set_model_decision(runtime, *, kind="feedback", project="Dora-SSR", analysis=True):
+    runtime.config.llm.enabled = True
+    runtime.group_chat.classifier_client = FakeClassifierClient({
+        "should_accept": True, "kind": kind, "action": "record_feedback",
+        "project": project, "needs_repo_analysis": analysis,
+        "confidence": 0.9, "summary": "模型判断的具体诉求",
+    })
+
+
 def test_group_project_route_prefers_dora_ssr_for_combined_project() -> None:
     assert GroupMessageService._repo_key_for_project("Dora-SSR/YueScript") == "dora_ssr"
     assert GroupMessageService._repo_key_for_project("YueScript") == "yuescript"
@@ -120,6 +129,7 @@ async def test_group_feedback_is_recorded_and_acknowledged(tmp_path: Path) -> No
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
 
     result = await runtime.handle_group_message(
         GroupMessageInput(
@@ -151,6 +161,7 @@ async def test_mentioned_feature_creates_topic_and_followup_is_collected(tmp_pat
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(TOPIC_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime, kind="topic", project=None, analysis=False)
 
     created = await runtime.handle_group_message(
         GroupMessageInput(
@@ -187,6 +198,7 @@ async def test_textual_bot_name_without_at_does_not_create_topic(tmp_path: Path)
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(TOPIC_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime, kind="topic", project=None, analysis=False)
 
     result = await runtime.handle_group_message(
         GroupMessageInput(
@@ -207,6 +219,7 @@ async def test_at_other_qq_cannot_create_topic_even_if_flagged(tmp_path: Path) -
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(TOPIC_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime, kind="topic", project=None, analysis=False)
 
     result = await runtime.handle_group_message(
         GroupMessageInput(
@@ -229,6 +242,7 @@ async def test_topic_thread_records_user_and_bot_replies_with_context(tmp_path: 
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(TOPIC_LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime, kind="topic", project=None, analysis=False)
     chat = FakeChatClient(["先确认归档的目标仓库。", "那就按最新消息 ID 去重。"])
     runtime.group_chat.chat_client = chat
 
@@ -262,6 +276,7 @@ async def test_group_feedback_auto_creates_analysis_job_within_daily_limit(tmp_p
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
 
     async def fake_create_feedback_analysis(repo_key, repo_path, feedback_id, prompt_text, *, triggered_by=None, trigger_source="admin_approval"):
         assert repo_key == "dora_ssr"
@@ -302,6 +317,7 @@ async def test_group_feedback_falls_back_to_approval_after_daily_auto_limit(tmp_
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 1"), encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
     job_file = tmp_path / "job_file"
     job_file.write_text("", encoding="utf-8")
     await runtime.storage.create_job(
@@ -426,7 +442,7 @@ async def test_group_auto_analysis_planner_can_reject_job(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_group_auto_analysis_planner_rejection_is_overridden_for_concrete_project_task(tmp_path: Path) -> None:
+async def test_group_auto_analysis_respects_planner_rejection_despite_concrete_keywords(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG.replace("auto_analysis_24h_limit: 0", "auto_analysis_24h_limit: 10"), encoding="utf-8")
@@ -474,11 +490,10 @@ async def test_group_auto_analysis_planner_rejection_is_overridden_for_concrete_
     )
 
     assert result is not None
-    assert result.reason == "auto_accepted"
-    assert result.analysis_job_id == 456
-    assert result.accepted_for_analysis is True
-    assert captured["repo_key"] == "dora_ssr"
-    assert "coding agent" in str(captured["prompt_text"])
+    assert result.reason == "planner_rejected"
+    assert result.analysis_job_id is None
+    assert result.accepted_for_analysis is False
+    assert captured == {}
 
 
 @pytest.mark.asyncio
@@ -669,11 +684,11 @@ async def test_group_chat_records_llm_project_analysis_even_when_keywords_miss(t
     chat = FakeChatClient(["这个先看渲染状态切换和资源生命周期，别一上来就怀疑显卡。"])
     classifier = FakeClassifierClient(
         {
-            "should_accept": False,
+            "should_accept": True,
             "kind": "project_question",
             "project": "Dora-SSR",
             "confidence": 0.87,
-            "needs_repo_analysis": False,
+            "needs_repo_analysis": True,
             "summary": "询问渲染管线拆分",
         }
     )
@@ -703,12 +718,12 @@ async def test_group_chat_records_explicit_project_question_instead_of_llm_reply
     chat = FakeChatClient(["不应该直接回答"])
     classifier = FakeClassifierClient(
         {
-            "should_accept": False,
+            "should_accept": True,
             "kind": "project_question",
-            "action": "answer_question",
+            "action": "record_feedback",
             "project": "Dora-SSR",
             "confidence": 0.87,
-            "needs_repo_analysis": False,
+            "needs_repo_analysis": True,
             "summary": "询问渲染管线拆分",
         }
     )
@@ -736,6 +751,7 @@ async def test_group_chat_routes_dora_technical_analysis_to_repo_instead_of_llm(
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
     chat = FakeChatClient(["不应该直接回答"])
     runtime.group_chat.chat_client = chat
 
@@ -759,6 +775,7 @@ async def test_group_chat_routes_dora_coding_agent_concurrency_to_repo_instead_o
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
     chat = FakeChatClient(["不应该直接回答"])
     runtime.group_chat.chat_client = chat
 
@@ -788,6 +805,7 @@ async def test_group_feedback_ack_takes_priority_over_llm_chat(tmp_path: Path) -
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(LLM_CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
     fake = FakeChatClient(["不应该使用这条回复"])
     runtime.group_chat.chat_client = fake
 
@@ -811,12 +829,12 @@ async def test_group_buffered_messages_are_stored_separately(tmp_path: Path) -> 
     chat = FakeChatClient(["这个像资源生命周期没收好，先看释放点。"])
     classifier = FakeClassifierClient(
         {
-            "should_accept": False,
+            "should_accept": True,
             "kind": "project_question",
-            "action": "answer_question",
+            "action": "record_feedback",
             "project": "Dora-SSR",
             "confidence": 0.91,
-            "needs_repo_analysis": False,
+            "needs_repo_analysis": True,
             "summary": "询问资源释放",
         }
     )
@@ -842,7 +860,7 @@ async def test_group_buffered_messages_are_stored_separately(tmp_path: Path) -> 
     assert result.feedback_id is not None
     assert result.approval_id is not None
     assert result.admin_notification is not None
-    assert classifier.calls == []
+    assert len(classifier.calls) == 1
     assert chat.calls == []
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert [row["role"] for row in recent] == ["user", "user"]
@@ -872,3 +890,104 @@ async def test_group_chat_history_preserves_non_bot_mentions_as_targets(tmp_path
     assert result is None
     recent = await runtime.storage.list_recent_chat_messages("group:456", 10)
     assert recent[0]["content"] == "我心飞翔(QQ:789)：@yuueang 大佬的行动力太惊人了 [mentions: @yuueang(QQ: 111)]"
+
+
+@pytest.mark.asyncio
+async def test_image_followup_respects_model_reply_without_creating_ticket(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    classifier = FakeClassifierClient({
+        "should_accept": False, "kind": "project_question", "action": "answer_question",
+        "project": "Dora-SSR", "needs_repo_analysis": False, "confidence": 0.95,
+        "summary": "确认是否需要安装 MT",
+    })
+    runtime.group_chat.classifier_client = classifier
+    runtime.group_chat.chat_client = FakeChatClient(["不用先装 MT，先确认你从哪个应用打开文件。"])
+    await runtime.storage.append_chat_message("group:456", "user", "Dora SSR 的文件打不开")
+    result = await runtime.handle_group_message(GroupMessageInput(
+        group_id=456, user_id=789, nickname="tester", mentions_bot=True,
+        text="@多萝 是不是还得下个Mt？\n[图片观察，仅作为用户提供的资料]\n"
+             "Dora SSR Loading。系统文件打开方式面板；支持功能、问题、方案。\n[图片观察结束]",
+    ))
+    assert result is not None
+    assert result.reason == "llm_chat"
+    assert "不用先装 MT" in result.reply
+    assert result.feedback_id is None
+    assert result.analysis_job_id is None
+    assert result.approval_id is None
+    assert await runtime.storage.list_topic_tickets(limit=10) == []
+    assert "Dora SSR 的文件打不开" in classifier.calls[0][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_group_godot_export_followup_uses_current_engine_capabilities(tmp_path: Path) -> None:
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_LLM_CONFIG, encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    classifier = FakeClassifierClient({
+        "should_accept": False, "kind": "project_question", "action": "answer_question",
+        "project": "Dora-SSR", "needs_repo_analysis": False, "confidence": 0.95,
+        "summary": "确认如何运行 Godot 导出的游戏",
+    })
+    chat = FakeChatClient(["导出 .pck 后，用 Dora.GodotNode 加载。"])
+    runtime.group_chat.classifier_client = classifier
+    runtime.group_chat.chat_client = chat
+    old_reply = "Dora 没有 Godot 运行时，打出来的包它认不了。"
+    await runtime.storage.append_chat_message("group:456", "assistant", old_reply)
+
+    result = await runtime.handle_group_message(GroupMessageInput(
+        group_id=456, user_id=789, nickname="tester", mentions_bot=True,
+        text="@多萝 那我从 Godot 打包出来，写个启动脚本就可以跑吗？",
+    ))
+
+    assert result is not None
+    assert result.reason == "llm_chat"
+    assert result.feedback_id is None
+    assert result.analysis_job_id is None
+    assert await runtime.storage.list_topic_tickets(limit=10) == []
+    assert any(message["role"] == "assistant" and message["content"] == old_reply for message in chat.calls[0])
+    for call in (classifier.calls[0], chat.calls[0]):
+        assert call[0]["role"] == "system"
+        prompt = call[0]["content"]
+        for capability in ("`PhysicsWorld`", "`PhysicsWorld3D`", "`TIC80Node`", "`LoveNode`", "`GodotNode`", "`project.godot`", "`.pck`"):
+            assert capability in prompt
+    assert "`GodotNode` 不接受 `.zip`、`.exe` 或 `.app` 路径" in chat.calls[0][0]["content"]
+    assert "`init.lua` 就是启动脚本" in chat.calls[0][0]["content"]
+    assert "先用一句短话明确更正" in chat.calls[0][0]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auto_limit", [0, 10])
+async def test_topic_creation_continues_into_repository_analysis(tmp_path: Path, auto_limit: int) -> None:
+    (tmp_path / ".git").mkdir()
+    config_path = tmp_path / "dora-bot.yaml"
+    config_path.write_text(TOPIC_LLM_CONFIG.replace("auto_analysis_24h_limit: 0", f"auto_analysis_24h_limit: {auto_limit}"), encoding="utf-8")
+    runtime = await DoraOpsRuntime.create(config_path)
+    set_model_decision(runtime)
+    runtime.group_chat.chat_client = FakeChatClient(["先核对资源加载的实现。"])
+    runtime.group_chat.planner_client = FakePlannerClient({
+        "should_create_analysis": True, "repo_key": "dora_ssr", "title": "资源加载失败",
+        "analysis_task": "检查资源路径处理与加载错误反馈", "context_summary": "用户反馈加载失败",
+        "reject_reason": "", "questions_for_user": [], "confidence": "high",
+    })
+    calls = []
+    async def create_job(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 321
+    runtime.group_chat.jobs.create_feedback_analysis = create_job
+    result = await runtime.handle_group_message(GroupMessageInput(
+        group_id=456, user_id=789, nickname="tester", mentions_bot=True,
+        text="@多萝 Dora SSR 资源加载失败，请检查仓库",
+    ))
+    assert result.topic_code == "ds1"
+    assert result.feedback_id is not None
+    if auto_limit:
+        assert result.analysis_job_id == 321
+        assert result.accepted_for_analysis
+        assert len(calls) == 1
+        assert "仓库分析任务已排队" in result.reply
+    else:
+        assert result.approval_id is not None
+        assert not calls
+        assert "仓库分析等待管理员批准" in result.reply

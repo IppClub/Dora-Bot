@@ -30,12 +30,6 @@ class TopicService:
     def codes_in_text(text: str) -> tuple[str, ...]:
         return tuple(dict.fromkeys(f"ds{match.group(1)}".lower() for match in TOPIC_CODE_RE.finditer(text)))
 
-    @staticmethod
-    def is_ticket_candidate(text: str) -> bool:
-        lowered = text.lower()
-        markers = ("issue", "feature", "bug", "需求", "功能", "问题", "设计", "方案", "改进", "支持")
-        return len(text.strip()) >= 8 and any(marker in lowered for marker in markers)
-
     async def record_references(
         self,
         *,

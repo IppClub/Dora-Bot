@@ -30,3 +30,18 @@ def test_complete_reports_empty_content_after_bounded_retries(monkeypatch: pytes
     with pytest.raises(LLMError, match=r"已重试 3 次.*finish_reason=length"):
         client._complete_sync([{"role": "user", "content": "test"}])
     assert calls == 3
+
+
+def test_tool_call_uses_thinking_compatible_choice_and_requires_arguments(monkeypatch):
+    client = OpenAICompatibleChatClient(LLMProfileConfig())
+    payloads = []
+    def response(payload):
+        payloads.append(payload)
+        return {"tool_calls": [{"function": {"name": "classify_message", "arguments": '{"action":"reply"}'}}]}
+    monkeypatch.setattr(client, "_request_message", response)
+    result = client._complete_tool_call_sync([], {"type": "function", "function": {"name": "classify_message"}}, "classify_message")
+    assert payloads[0]["tool_choice"] == "auto"
+    assert result == {"action": "reply"}
+    monkeypatch.setattr(client, "_request_message", lambda payload: {"content": "普通正文不是分类结果"})
+    with pytest.raises(LLMError, match="缺少工具调用参数"):
+        client._complete_tool_call_sync([], {}, "classify_message")

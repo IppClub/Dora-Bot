@@ -192,6 +192,15 @@ async def test_admin_ping_and_classify(tmp_path: Path) -> None:
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    runtime.config.llm.enabled = True
+    decision = FakeClassifierClient({
+        "should_accept": True, "kind": "project_question", "action": "record_feedback",
+        "project": "YueScript", "confidence": 0.9, "needs_repo_analysis": True,
+        "summary": "模型识别的项目问题",
+    })
+    runtime.admin.classifier_client = decision
+    runtime.group_chat.classifier_client = decision
+
 
     denied = await runtime.handle_admin_text("/test ping", user_id=999)
     assert denied == "没有管理员权限。"
@@ -800,6 +809,15 @@ async def test_admin_private_chat_records_feedback_and_approval(tmp_path: Path) 
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    runtime.config.llm.enabled = True
+    decision = FakeClassifierClient({
+        "should_accept": True, "kind": "project_question", "action": "record_feedback",
+        "project": "Dora-SSR", "confidence": 0.9, "needs_repo_analysis": True,
+        "summary": "模型识别的项目问题",
+    })
+    runtime.admin.classifier_client = decision
+    runtime.group_chat.classifier_client = decision
+
 
     ignored = await runtime.handle_admin_text("Dora SSR Web IDE 无法刷新", user_id=999)
     assert ignored is None
@@ -933,11 +951,11 @@ async def test_admin_private_project_question_records_without_llm_reply(tmp_path
     runtime.admin.chat_client = chat  # type: ignore[assignment]
     runtime.admin.classifier_client = FakeClassifierClient(
         {
-            "should_accept": False,
+            "should_accept": True,
             "kind": "project_question",
             "project": "Dora-SSR",
             "confidence": 0.91,
-            "needs_repo_analysis": False,
+            "needs_repo_analysis": True,
             "summary": "询问渲染管线拆分",
         }
     )  # type: ignore[assignment]
@@ -1006,6 +1024,15 @@ async def test_group_chat_test_command_simulates_group_message(tmp_path: Path) -
     config_path = tmp_path / "dora-bot.yaml"
     config_path.write_text(CONFIG, encoding="utf-8")
     runtime = await DoraOpsRuntime.create(config_path)
+    runtime.config.llm.enabled = True
+    decision = FakeClassifierClient({
+        "should_accept": True, "kind": "feedback", "action": "record_feedback",
+        "project": "Dora-SSR", "confidence": 0.9, "needs_repo_analysis": True,
+        "summary": "模型识别的项目问题",
+    })
+    runtime.admin.classifier_client = decision
+    runtime.group_chat.classifier_client = decision
+
 
     result = await runtime.handle_admin_text(
         "/test group-chat 456 Dora SSR Web IDE 创建文件后无法刷新",

@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from .analysis_planner import AnalysisPlan, plan_feedback_analysis_with_llm
-from .classifier import Classification, classify_text, classify_text_with_llm
+from .classifier import Classification, classify_text_with_llm
 from .config import BotConfig, repository_local_path
 from .group_chat import DORA_PERSONA_PROMPT, GroupMessageInput, GroupMessageResult, GroupMessageService
 from .jobs import JobManager
@@ -115,11 +115,11 @@ class AdminCommands:
             return "pong：配置已加载，数据库可读写。"
 
         if command == "classify":
-            result = classify_text(arg)
+            result = await classify_text_with_llm(arg, self.classifier_client if self.config.llm.enabled else None)
             return json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
 
         if command == "feedback":
-            result = classify_text(arg)
+            result = await classify_text_with_llm(arg, self.classifier_client if self.config.llm.enabled else None)
             feedback_id = await self.storage.create_feedback(
                 original_text=arg,
                 group_id=group_id,

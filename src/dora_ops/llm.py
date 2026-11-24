@@ -68,7 +68,9 @@ class OpenAICompatibleChatClient:
                 "temperature": self.profile.temperature,
                 "max_tokens": self.profile.max_tokens,
                 "tools": [tool],
-                "tool_choice": {"type": "function", "function": {"name": tool_name}},
+                # Thinking-mode providers can reject forced named tool choices.
+                # The caller requests the tool in its prompt; require tool arguments below.
+                "tool_choice": "auto",
             }
         )
         tool_calls = message.get("tool_calls")

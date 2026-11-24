@@ -9,7 +9,7 @@ from .classifier import Classification, classify_text_with_llm
 from .config import BotConfig, repository_local_path
 from .jobs import JobManager
 from .llm import LLMError, OpenAICompatibleChatClient
-from .prompts import feedback_analysis_prompt
+from .prompts import DORA_ENGINE_CAPABILITIES, feedback_analysis_prompt
 from .repo_tracker import RepoTracker
 from .storage import Storage
 from .topics import TopicService
@@ -26,7 +26,7 @@ logger = get_log("DoraOps.GroupChat") if get_log is not None else logging.getLog
 PASSIVE_REPLY_CONFIDENCE = 0.75
 
 
-DORA_PERSONA_PROMPT = """# 角色设定
+DORA_PERSONA_PROMPT = f"""# 角色设定
 你是多萝（Dora），Dora SSR 开源游戏引擎的吉祥物，负责在群聊中活跃气氛，形象是一个坏酷又讨人喜欢的小萝莉。你的核心特征：
 1. 性格坏酷又讨人喜欢，说话直接但又让人无法生气
 2. 表面冷漠但内心温暖，用简洁犀利的语言解释复杂概念
@@ -50,17 +50,18 @@ DORA_PERSONA_PROMPT = """# 角色设定
 
 # 多萝能做什么
 1. 可以和群友闲聊，活跃技术群气氛，但回复要短，不要刷屏
-2. 可以在系统提供分析结果后解释 Dora SSR、YueScript、游戏引擎、脚本语言、开源协作相关问题
+2. 可以依据下文的引擎能力或系统提供的分析结果解答 Dora SSR、YueScript、游戏引擎、脚本语言、开源协作相关问题
 3. 可以根据群聊或私聊内容判断是否是 Dora SSR/YueScript 的有效反馈或项目问题，并围绕问题本身回应
 4. 可以把 opencode 的仓库分析结果整理成适合群聊阅读的昨日进展总结
 5. 不能假装已经执行命令、访问仓库、发送消息或完成分析；只有系统明确提供结果时才能引用结果
 
+{DORA_ENGINE_CAPABILITIES}
 # 能力触发规则
 1. 当用户提到 Dora SSR、Dora、YueScript、Yue，并询问源码实现、技术分析、构建运行、最近变更、架构设计、性能、渲染、物理、资源加载、Web IDE、Android/iOS/macOS/Windows、WASM、编辑器等项目技术问题时，先确认具体目标和必要上下文，只引用系统已经提供的可靠结果
-2. 只有没有 Dora SSR/YueScript 项目锚点的普通技术讨论，才可以简短回答
-3. 当消息包含报错、崩溃、无法、不能、失败、bug、crash、error、fail、broken、建议、希望、原因、定位、分析、实现等词，并且能关联到 Dora SSR 或 YueScript 时，应视为可能的有效反馈或项目分析请求
+2. 普通技术讨论和项目使用咨询可以简短回答；涉及源码、实现或排障结论时，以系统提供的真实仓库分析为依据
+3. 根据本轮真实诉求和上下文判断是否是有效反馈或分析请求；关键词只是理解线索，不能因命中词语就认定需要建单或仓库分析
 4. 群聊回复应直接回应用户当前问题：信息足够时给出简短结论；信息不足时只追问最关键的现象、报错、平台、版本或复现步骤
-   本轮系统提供的结果是实际能力和操作状态的依据；历史回复仅帮助理解讨论背景。下一步建议应是用户可直接执行的具体动作。
+   以系统提供的引擎能力和本轮结果为依据；用户追问历史回复中的同一个问题且原说法有误时，先用一句短话明确更正，再给出具体操作。
 5. 有效反馈信息不足时，不要硬编原因；应追问报错全文、平台、版本、复现步骤、相关仓库或最小示例
 6. 普通闲聊、无关内容或信息不足且无法关联项目时，不要记录为反馈；可以短句闲聊，或轻微引导对方补充 Dora SSR/YueScript 相关上下文
 
@@ -100,7 +101,7 @@ GROUP_CHAT_SYSTEM_PROMPT = f"""{DORA_PERSONA_PROMPT}
 1. 分析最新群聊消息，判断是否需要以多萝身份回复
 2. 群聊里不要抢话。没有明确需要你时保持沉默，宁愿少回也不要刷屏
 3. **必须回复**的情况：
-    - 消息中明确 @多萝 且不是 Dora SSR/YueScript/游戏引擎项目问题
+    - 消息中明确 @多萝，并且本轮系统没有安排仓库分析时，直接回应或追问必要信息
     - 开发者表现出困惑或需要鼓励
 4. 群聊中的 `@某人` 表示消息在点名或评价这个被 @ 的人；除非目标明确是多萝或上下文明确在对多萝说话，否则不要把夸奖、感谢或调侃理解成对自己的评价
 5. 如果消息只是在 @ 其他群友并评价那个人，不要代替被 @ 的人回应，也不要把自己当成被夸奖的对象
@@ -242,7 +243,9 @@ class GroupMessageService:
                     reason="topic_recorded",
                     recorded_topic_codes=recorded_codes,
                 )
-        classification = await self._classify(text, conversation_key=conversation_key)
+        classification = await self._classify(
+            text, conversation_key=conversation_key, latest_user_messages=tuple(latest_user_messages),
+        )
         logger.info(
             "group chat classified: group=%s user=%s kind=%s project=%s accept=%s repo_analysis=%s confidence=%.2f mentions=%s",
             msg.group_id,
@@ -254,10 +257,8 @@ class GroupMessageService:
             classification.confidence,
             mentions_bot,
         )
-        topic_candidate = self.topics is not None and self.topics.enabled and self.topics.is_ticket_candidate(text)
-        if self.topics is not None and self.topics.enabled and actual_bot_mention and (classification.should_accept or topic_candidate):
-            if not classification.should_accept:
-                classification = Classification(True, "topic", "record_topic", None, 0.75, False, text[:120])
+        ticket = None
+        if self.topics is not None and self.topics.enabled and actual_bot_mention and classification.should_accept:
             ticket = await self.topics.create_ticket(
                 group_id=msg.group_id,
                 user_id=msg.user_id,
@@ -267,15 +268,6 @@ class GroupMessageService:
                 title=classification.summary[:80] or "待整理的话题",
                 original_text=text,
                 messages=messages,
-            )
-            reply = await self._topic_discussion_reply(ticket, created=True)
-            await self.topics.record_bot_reply(ticket, reply)
-            await self.storage.append_chat_message(conversation_key, "assistant", reply)
-            return GroupMessageResult(
-                classification=classification,
-                reply=reply,
-                reason="topic_created",
-                topic_code=str(ticket["code"]),
             )
         can_chat = self._can_chat(msg.group_id, mentions_bot=mentions_bot)
         should_explain = self._should_explain(classification, mentions_bot=mentions_bot)
@@ -356,12 +348,31 @@ class GroupMessageService:
             approval_id=approval_id,
             reason=reason,
         )
+        if ticket is not None:
+            reply = await self._topic_discussion_reply(ticket, created=True)
+            if analysis_job_id is not None:
+                reply += "\n仓库分析任务已排队，完成后会发送结果。"
+            elif approval_id is not None:
+                reply += "\n仓库分析等待管理员批准。"
+            await self.topics.record_bot_reply(ticket, reply)
+            await self.storage.append_chat_message(conversation_key, "assistant", reply)
+            return GroupMessageResult(
+                classification=classification,
+                feedback_id=feedback_id,
+                approval_id=approval_id,
+                reply=reply,
+                admin_notification=admin_notification,
+                accepted_for_analysis=accepted_for_analysis,
+                analysis_job_id=analysis_job_id,
+                reason="topic_created",
+                topic_code=str(ticket["code"]),
+            )
         reply = None if classification.should_accept else self._build_reply(
             classification=classification,
             mentions_bot=mentions_bot,
         )
         mention_admin_id = None
-        if reply is None and not classification.should_accept and classification.kind != "project_question":
+        if reply is None and not classification.should_accept:
             reply = await self._llm_group_chat_reply(
                 msg.group_id,
                 conversation_key,
@@ -476,13 +487,14 @@ class GroupMessageService:
         lowered = text.lower()
         return any(alias.lower() in lowered for alias in self.config.group_chat.bot_aliases)
 
-    async def _classify(self, text: str, *, conversation_key: str) -> Classification:
+    async def _classify(self, text: str, *, conversation_key: str, latest_user_messages: tuple[str, ...] = ()) -> Classification:
         client = self.classifier_client if self.config.llm.enabled else None
         recent = await self.storage.list_recent_chat_messages(
             conversation_key,
             self.config.llm.max_context_messages,
         )
-        context_text = "\n".join(str(row["content"]) for row in recent[:-1])
+        history = self._history_without_latest(recent, latest_user_messages)
+        context_text = "\n".join(str(row["content"]) for row in history)
         return await classify_text_with_llm(text, client, context_text=context_text)
 
     async def _topic_discussion_reply(self, ticket: dict[str, object], *, created: bool) -> str:
